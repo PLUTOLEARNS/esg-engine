@@ -37,6 +37,10 @@ class ESGDB:
                 - roic: float
                 - market_cap: float
                 - last_updated: iso8601 string
+                - data_source: str (optional)
+                - is_delisted: bool (optional)
+                - error_message: str (optional)
+                - currency: str (optional)
         """
         # Validate required fields
         required_fields = [

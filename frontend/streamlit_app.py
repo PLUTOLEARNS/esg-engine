@@ -101,6 +101,95 @@ def upload_and_rank_portfolio(df: pd.DataFrame):
         return None
 
 
+def format_market_cap(market_cap: float, ticker: str) -> str:
+    """
+    Format market cap with appropriate currency and units.
+    
+    Args:
+        market_cap: Market cap in USD
+        ticker: Stock ticker to determine currency
+        
+    Returns:
+        Formatted string with currency symbol and units
+    """
+    # Determine currency based on ticker
+    if ticker.endswith('.NS') or ticker.endswith('.BO'):
+        # Indian stocks - convert USD to INR (approximate rate: 1 USD = 83 INR)
+        value_inr = market_cap * 83
+        if value_inr >= 1e12:  # Trillion
+            return f"₹{value_inr/1e12:.1f}T"
+        elif value_inr >= 1e9:  # Billion  
+            return f"₹{value_inr/1e9:.1f}B"
+        elif value_inr >= 1e6:  # Million
+            return f"₹{value_inr/1e6:.0f}M"
+        else:
+            return f"₹{value_inr/1e6:.1f}M"
+    else:
+        # US stocks - keep in USD
+        if market_cap >= 1e12:  # Trillion
+            return f"${market_cap/1e12:.1f}T"
+        elif market_cap >= 1e9:  # Billion
+            return f"${market_cap/1e9:.1f}B"
+        elif market_cap >= 1e6:  # Million
+            return f"${market_cap/1e6:.0f}M"
+        else:
+            return f"${market_cap/1e6:.1f}M"
+
+
+def get_delisted_indicator(holding: dict) -> str:
+    """
+    Get visual indicator for delisted or replaced companies.
+    
+    Args:
+        holding: Company holding data
+        
+    Returns:
+        String with appropriate indicator
+    """
+    data_source = holding.get('data_source', '')
+    is_delisted = holding.get('is_delisted', False)
+    error_message = holding.get('error_message', '')
+    
+    if is_delisted or 'replacement' in data_source:
+        return "🔄 "  # Replacement data indicator
+    elif 'sector_defaults' in data_source:
+        return "🏭 "  # Sector defaults indicator  
+    elif error_message:
+        return "⚠️ "  # Error indicator
+    else:
+        return ""     # No indicator for normal data
+
+
+def get_company_display_name(holding: dict) -> str:
+    """
+    Get display name for company with delisted information.
+    
+    Args:
+        holding: Company holding data
+        
+    Returns:
+        Formatted company name with status info
+    """
+    ticker = holding.get('ticker', '')
+    data_source = holding.get('data_source', '')
+    is_delisted = holding.get('is_delisted', False)
+    
+    # Clean ticker for display
+    display_ticker = ticker.replace('.NS', '').replace('.BO', '').upper()
+    
+    if is_delisted or 'replacement' in data_source:
+        replacement_ticker = data_source.split('_')[-1] if 'replacement' in data_source else ''
+        if replacement_ticker:
+            replacement_name = replacement_ticker.replace('.NS', '').replace('.BO', '')
+            return f"{display_ticker} (using {replacement_name} data)"
+        else:
+            return f"{display_ticker} (delisted)"
+    elif 'sector_defaults' in data_source:
+        return f"{display_ticker} (sector estimates)"
+    else:
+        return display_ticker
+
+
 def upload_and_rank_portfolio_enhanced(df: pd.DataFrame, show_ingestion_details: bool = False):
     """
     Enhanced portfolio ranking with automatic data ingestion and robustness features.
@@ -239,12 +328,41 @@ def get_controversy_data(ticker: str):
     except:
         return {"ticker": ticker, "controversies": []}
 
-def create_kpi_cards(summary_data, controversy_count, theme="light"):
-    """Create KPI cards with traffic light colors."""
+def create_kpi_cards(summary_data, controversy_count, portfolio_data=None, theme="light"):
+    """Create KPI cards with traffic light colors and proper metric calculation."""
     col1, col2, col3 = st.columns(3)
     
+    # Calculate actual portfolio metrics from holdings data
+    portfolio_esg = 0
+    portfolio_roic = 0
+    total_weight = 0
+    
+    if portfolio_data:
+        for holding in portfolio_data:
+            if holding.get('ticker') != 'PORTFOLIO_TOTAL':
+                weight = holding.get('weight', 0)
+                esg_score = holding.get('esg_score', 0)
+                roic = holding.get('roic', 0)
+                
+                if weight > 0:
+                    if esg_score > 0:  # Only include non-zero ESG scores
+                        portfolio_esg += weight * esg_score
+                        total_weight += weight
+                    
+                    if roic > 0:  # Only include non-zero ROIC values
+                        portfolio_roic += weight * roic
+    
+    # Use summary data as fallback
+    if portfolio_esg == 0 or total_weight == 0:
+        portfolio_esg = summary_data.get("portfolio_weighted_esg", 0)
+    else:
+        portfolio_esg = portfolio_esg / total_weight if total_weight > 0 else 0
+        
+    if portfolio_roic == 0:
+        portfolio_roic = summary_data.get("portfolio_weighted_roic", 0)
+    
     with col1:
-        esg_score = summary_data.get("portfolio_weighted_esg", 0)
+        esg_score = portfolio_esg
         
         # Traffic light logic for ESG score
         if esg_score >= 80:
@@ -253,25 +371,37 @@ def create_kpi_cards(summary_data, controversy_count, theme="light"):
         elif esg_score >= 60:
             color_class = "metric-yellow" 
             status = "🟡 Good"
-        else:
+        elif esg_score >= 30:
+            color_class = "metric-yellow"
+            status = "🟠 Fair"
+        elif esg_score > 0:
             color_class = "metric-red"
             status = "🔴 Needs Improvement"
+        else:
+            color_class = "metric-red"
+            status = "⚠️ No Data"
+        
+        display_value = f"{esg_score:.1f}" if esg_score > 0 else "N/A"
         
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">Portfolio ESG Score</div>
-            <div class="metric-value {color_class}">{esg_score:.1f}</div>
+            <div class="metric-value {color_class}">{display_value}</div>
             <div style="font-size: 0.9rem; margin-top: 0.5rem;">{status}</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col2:
-        roic = summary_data.get("portfolio_weighted_roic", 0) * 100
+        roic = portfolio_roic * 100
+        roic_color = "metric-green" if roic >= 15 else "metric-yellow" if roic >= 10 else "metric-red"
+        roic_display = f"{roic:.1f}%" if roic > 0 else "N/A"
+        roic_status = "Return on Invested Capital" if roic > 0 else "No Data Available"
+        
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">Weighted ROIC</div>
-            <div class="metric-value">{roic:.1f}%</div>
-            <div style="font-size: 0.9rem; margin-top: 0.5rem;">Return on Invested Capital</div>
+            <div class="metric-value {roic_color}">{roic_display}</div>
+            <div style="font-size: 0.9rem; margin-top: 0.5rem;">{roic_status}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -410,7 +540,7 @@ def create_esg_ranking_chart(portfolio_data, theme="light"):
     st.plotly_chart(fig, use_container_width=True)
 
 def create_portfolio_datatable(portfolio_data):
-    """Create interactive datatable with sorting and filtering."""
+    """Create interactive datatable with sorting, filtering, and delisted company indicators."""
     if not portfolio_data:
         st.warning("No data available for datatable")
         return
@@ -422,30 +552,93 @@ def create_portfolio_datatable(portfolio_data):
         st.warning("No holdings data available")
         return
     
+    # Add status indicators for delisted/replacement companies
+    holdings_df['status_indicator'] = holdings_df.apply(lambda row: get_delisted_indicator(row.to_dict()), axis=1)
+    holdings_df['company_name'] = holdings_df.apply(lambda row: get_company_display_name(row.to_dict()), axis=1)
+    
     # Format columns for display
     holdings_df['weight'] = holdings_df['weight'].apply(lambda x: f"{x:.1%}")
-    holdings_df['esg_score'] = holdings_df['esg_score'].apply(lambda x: f"{x:.1f}")
-    holdings_df['roic'] = holdings_df['roic'].apply(lambda x: f"{x:.1%}")
-    holdings_df['market_cap'] = holdings_df['market_cap'].apply(lambda x: f"${x/1e9:.1f}B")
+    holdings_df['esg_score'] = holdings_df['esg_score'].apply(lambda x: f"{x:.1f}" if x > 0 else "N/A")
+    holdings_df['roic'] = holdings_df['roic'].apply(lambda x: f"{x:.1%}" if x > 0 else "N/A")
+    
+    # Format market cap with proper currency
+    holdings_df['market_cap_formatted'] = holdings_df.apply(
+        lambda row: format_market_cap(row.get('market_cap', 0), row.get('ticker', '')), axis=1
+    )
+    
+    holdings_df['environmental'] = holdings_df['environmental'].apply(lambda x: f"{x:.1f}" if x > 0 else "N/A")
+    holdings_df['social'] = holdings_df['social'].apply(lambda x: f"{x:.1f}" if x > 0 else "N/A")
+    holdings_df['governance'] = holdings_df['governance'].apply(lambda x: f"{x:.1f}" if x > 0 else "N/A")
     holdings_df['esg_zscore'] = holdings_df['esg_zscore'].apply(lambda x: f"{x:.2f}")
     holdings_df['roic_zscore'] = holdings_df['roic_zscore'].apply(lambda x: f"{x:.2f}")
     
+    # Create status column
+    holdings_df['status'] = holdings_df['status_indicator'] + holdings_df['company_name']
+    
     # Select and rename columns for display
     display_df = holdings_df[[
-        'ticker', 'weight', 'esg_score', 'environmental', 'social', 'governance',
-        'roic', 'market_cap', 'esg_zscore', 'roic_zscore'
+        'status', 'weight', 'esg_score', 'environmental', 'social', 'governance',
+        'roic', 'market_cap_formatted', 'esg_zscore', 'roic_zscore'
     ]].copy()
     
     display_df.columns = [
-        'Ticker', 'Weight', 'ESG Score', 'Environmental', 'Social', 'Governance',
+        'Company', 'Weight', 'ESG Score', 'Environmental', 'Social', 'Governance',
         'ROIC', 'Market Cap', 'ESG Z-Score', 'ROIC Z-Score'
     ]
     
+    # Color-code based on data source
+    def style_dataframe(df):
+        def color_rows(row):
+            if '🔄' in str(row['Company']):  # Replacement data
+                return ['background-color: #FFF3E0'] * len(row)  # Light orange
+            elif '🏭' in str(row['Company']):  # Sector defaults
+                return ['background-color: #E8F5E8'] * len(row)  # Light green
+            elif '⚠️' in str(row['Company']):  # Error
+                return ['background-color: #FFEBEE'] * len(row)  # Light red
+            else:
+                return [''] * len(row)
+        
+        return df.style.apply(color_rows, axis=1)
+    
+    # Show legend
+    st.markdown("""
+    **Legend:**
+    - 🔄 Replacement data (delisted company)
+    - 🏭 Sector estimates (no data available)
+    - ⚠️ Data error or unavailable
+    - No symbol: Current market data
+    """)
+    
+    # Style and display dataframe
+    styled_df = style_dataframe(display_df)
     st.dataframe(
-        display_df,
+        styled_df,
         use_container_width=True,
         hide_index=True
     )
+
+def clean_text_for_pdf(text: str) -> str:
+    """Remove emojis and problematic Unicode characters for PDF generation."""
+    import re
+    # Remove emoji and other problematic Unicode characters
+    emoji_pattern = re.compile("["
+                          u"\U0001F600-\U0001F64F"  # emoticons
+                          u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+                          u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                          u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                          u"\U00002700-\U000027BF"  # dingbats
+                          u"\U0001f926-\U0001f937"
+                          u"\U00010000-\U0010ffff"
+                          u"\u2600-\u2B55"
+                          u"\u200d"
+                          u"\u23cf"
+                          u"\u23e9"
+                          u"\u231a"
+                          u"\ufe0f"  # dingbats
+                          u"\u3030"
+                          "]+", flags=re.UNICODE)
+    return emoji_pattern.sub(r'', text).strip()
+
 
 def generate_pdf_report(portfolio_data, summary_data, controversy_count):
     """Generate professional PDF report using reportlab with enhanced design."""
@@ -579,16 +772,17 @@ def generate_pdf_report(portfolio_data, summary_data, controversy_count):
             esg_color, esg_rating = colors['danger'], "Poor"
         
         roic_color = colors['success'] if portfolio_roic >= 15 else colors['accent'] if portfolio_roic >= 10 else colors['danger']
+        controversy_status = "Issues Detected" if controversy_count > 0 else "Clean"
         controversy_color = colors['danger'] if controversy_count > 0 else colors['success']
         
-        # Enhanced KPI Cards Table
+        # Enhanced KPI Cards Table (emoji-free for PDF)
         kpi_data = [
             # Headers
             ['Portfolio ESG Score', 'Weighted ROIC', 'Total Holdings', 'Risk Flags'],
             # Values with better formatting
             [f"{portfolio_esg:.1f}/100", f"{portfolio_roic:.1f}%", f"{total_holdings}", f"{controversy_count}"],
             # Descriptions
-            [f"{esg_rating}", "Return on Investment Capital", "Companies Analyzed", "Controversies Detected"]
+            [f"{esg_rating}", "Return on Investment Capital", "Companies Analyzed", controversy_status]
         ]
         
         kpi_table = Table(kpi_data, colWidths=[45*mm, 45*mm, 45*mm, 45*mm])
@@ -631,53 +825,62 @@ def generate_pdf_report(portfolio_data, summary_data, controversy_count):
         portfolio_title = Paragraph("Portfolio Composition & Analysis", section_style)
         story.append(portfolio_title)
         
-        # Enhanced holdings table
+        # Enhanced holdings table with proper formatting
         if portfolio_data:
-            # Prepare table data
+            # Prepare table data with better formatting
             holdings_data = [
-                ['Company', 'Weight', 'ESG Score', 'ROIC', 'Environment', 'Social', 'Governance', 'Market Cap (₹B)']
+                ['Company', 'Weight', 'ESG Score', 'ROIC', 'Environment', 'Social', 'Governance', 'Market Cap']
             ]
             
             for holding in portfolio_data:
                 if holding.get('ticker') != 'PORTFOLIO_TOTAL':
-                    ticker = holding.get('ticker', '').replace('.NS', '').upper()
-                    weight = f"{holding.get('weight', 0)*100:.1f}%"
-                    esg_score = f"{holding.get('esg_score', 0):.1f}"
-                    roic = f"{holding.get('roic', 0)*100:.1f}%"
-                    env = f"{holding.get('environmental', 0):.1f}"
-                    social = f"{holding.get('social', 0):.1f}"
-                    governance = f"{holding.get('governance', 0):.1f}"
-                    market_cap = f"{holding.get('market_cap', 0)/1e9:.0f}"
+                    # Get company display name with delisted status
+                    company_name = get_company_display_name(holding)
                     
-                    holdings_data.append([ticker, weight, esg_score, roic, env, social, governance, market_cap])
+                    # Format values properly
+                    weight = f"{holding.get('weight', 0)*100:.1f}%"
+                    esg_score = f"{holding.get('esg_score', 0):.1f}" if holding.get('esg_score', 0) > 0 else "N/A"
+                    roic = f"{holding.get('roic', 0)*100:.1f}%" if holding.get('roic', 0) > 0 else "N/A"
+                    env = f"{holding.get('environmental', 0):.1f}" if holding.get('environmental', 0) > 0 else "N/A"
+                    social = f"{holding.get('social', 0):.1f}" if holding.get('social', 0) > 0 else "N/A"
+                    governance = f"{holding.get('governance', 0):.1f}" if holding.get('governance', 0) > 0 else "N/A"
+                    
+                    # Format market cap with proper currency
+                    market_cap = format_market_cap(holding.get('market_cap', 0), holding.get('ticker', ''))
+                    
+                    holdings_data.append([
+                        company_name, weight, esg_score, roic, env, social, governance, market_cap
+                    ])
             
-            # Create holdings table with enhanced styling
-            holdings_table = Table(holdings_data, colWidths=[25*mm, 18*mm, 18*mm, 18*mm, 18*mm, 18*mm, 20*mm, 20*mm])
+            # Create holdings table with enhanced styling and proper column widths
+            holdings_table = Table(holdings_data, colWidths=[30*mm, 15*mm, 18*mm, 15*mm, 18*mm, 15*mm, 18*mm, 25*mm])
             holdings_table.setStyle(TableStyle([
                 # Header styling
                 ('BACKGROUND', (0, 0), (-1, 0), colors['secondary']),
                 ('TEXTCOLOR', (0, 0), (-1, 0), white),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('FONTSIZE', (0, 0), (-1, 0), 8),  # Smaller font for headers
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 
-                # Company name column (left-aligned)
-                ('ALIGN', (0, 1), (0, -1), 'LEFT'),
-                ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
-                ('TEXTCOLOR', (0, 1), (0, -1), colors['primary']),
+                # Data row styling
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),  # Smaller font for data
+                ('ALIGN', (0, 1), (0, -1), 'LEFT'),   # Company names left-aligned
+                ('ALIGN', (1, 1), (-1, -1), 'CENTER'), # Numbers center-aligned
                 
-                # Data rows
-                ('FONTNAME', (1, 1), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                # Alternating row colors
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, colors['light_gray']]),
                 
                 # Grid and padding
                 ('GRID', (0, 0), (-1, -1), 0.5, colors['medium_gray']),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),    # Reduced padding
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6), 
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),   
                 ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                
+                # Wrap text for company names
+                ('WORDWRAP', (0, 0), (0, -1), True),
             ]))
             
             story.append(holdings_table)
@@ -957,7 +1160,7 @@ def main():
         
         # KPI Cards
         st.subheader("📈 Key Performance Indicators")
-        create_kpi_cards(summary_data, total_controversies, theme)
+        create_kpi_cards(summary_data, total_controversies, portfolio_data, theme)
         
         # Charts section
         col1, col2 = st.columns(2)

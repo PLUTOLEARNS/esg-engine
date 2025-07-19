@@ -293,7 +293,7 @@ def auto_ingest_portfolio_data(tickers: List[str], force_refresh: bool = False) 
                     print(f"❌ Failed to fetch data for {ticker}: {company_data.error_message}")
                     continue
                 
-                # Convert CompanyData to database record format
+                # Convert CompanyData to database record format with enhanced metadata
                 record = {
                     'ticker': company_data.ticker,
                     'environmental': company_data.environmental,
@@ -304,8 +304,17 @@ def auto_ingest_portfolio_data(tickers: List[str], force_refresh: bool = False) 
                     'market_cap': company_data.market_cap,
                     'last_updated': company_data.last_updated,
                     'data_source': company_data.data_source,
-                    'is_delisted': company_data.is_delisted
+                    'is_delisted': company_data.is_delisted,
+                    'error_message': company_data.error_message
                 }
+                
+                # Add currency and market information based on ticker
+                if ticker.endswith('.NS') or ticker.endswith('.BO'):
+                    record['currency'] = 'INR'
+                    record['market'] = 'India'
+                else:
+                    record['currency'] = 'USD' 
+                    record['market'] = 'US'
                 
                 # Store in database using upsert
                 db.upsert_esg_record(record)
