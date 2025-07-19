@@ -782,13 +782,44 @@ def generate_pdf_report(portfolio_data, summary_data, controversy_count):
         exec_title = Paragraph("Executive Summary", section_style)
         story.append(exec_title)
         
-        # Calculate key metrics
-        portfolio_esg = summary_data.get('portfolio_weighted_esg', 0)
-        portfolio_roic = summary_data.get('portfolio_weighted_roic', 0) * 100
-        total_holdings = summary_data.get('total_holdings', 0)
+        # Calculate key metrics from actual portfolio data (same logic as create_kpi_cards)
+        portfolio_esg = 0
+        portfolio_roic = 0
+        total_weight = 0
+        valid_holdings = 0
+        
+        if portfolio_data:
+            for holding in portfolio_data:
+                if holding.get('ticker') != 'PORTFOLIO_TOTAL':
+                    weight = holding.get('weight', 0)
+                    esg_score = holding.get('esg_score', 0)
+                    roic = holding.get('roic', 0)
+                    
+                    if weight > 0:
+                        valid_holdings += 1
+                        if esg_score > 0:  # Only include non-zero ESG scores
+                            portfolio_esg += weight * esg_score
+                            total_weight += weight
+                        
+                        if roic > 0:  # Only include non-zero ROIC values
+                            portfolio_roic += weight * roic
+        
+        # Use summary data as fallback only if our calculation failed
+        if portfolio_esg == 0 or total_weight == 0:
+            portfolio_esg = summary_data.get('portfolio_weighted_esg', 0)
+        else:
+            portfolio_esg = portfolio_esg / total_weight if total_weight > 0 else 0
+            
+        if portfolio_roic == 0:
+            portfolio_roic = summary_data.get('portfolio_weighted_roic', 0)
+        
+        # Convert ROIC to percentage
+        portfolio_roic_pct = portfolio_roic * 100
+        
+        total_holdings = valid_holdings if valid_holdings > 0 else summary_data.get('total_holdings', 0)
         total_market_cap = sum(h.get('market_cap', 0) for h in portfolio_data if h.get('ticker') != 'PORTFOLIO_TOTAL') / 1e12
         
-        # Determine colors and ratings
+        # Determine colors and ratings based on calculated values
         if portfolio_esg >= 70:
             esg_color, esg_rating = colors['success'], "Excellent"
         elif portfolio_esg >= 50:
@@ -798,16 +829,19 @@ def generate_pdf_report(portfolio_data, summary_data, controversy_count):
         else:
             esg_color, esg_rating = colors['danger'], "Poor"
         
-        roic_color = colors['success'] if portfolio_roic >= 15 else colors['accent'] if portfolio_roic >= 10 else colors['danger']
+        roic_color = colors['success'] if portfolio_roic_pct >= 15 else colors['accent'] if portfolio_roic_pct >= 10 else colors['danger']
         controversy_status = "Issues Detected" if controversy_count > 0 else "Clean"
         controversy_color = colors['danger'] if controversy_count > 0 else colors['success']
         
         # Enhanced KPI Cards Table (emoji-free for PDF)
+        esg_display = f"{portfolio_esg:.1f}" if portfolio_esg > 0 else "N/A"
+        roic_display = f"{portfolio_roic_pct:.1f}%" if portfolio_roic_pct > 0 else "N/A"
+        
         kpi_data = [
             # Headers
             ['Portfolio ESG Score', 'Weighted ROIC', 'Total Holdings', 'Risk Flags'],
             # Values with better formatting
-            [f"{portfolio_esg:.1f}/100", f"{portfolio_roic:.1f}%", f"{total_holdings}", f"{controversy_count}"],
+            [f"{esg_display}/100", roic_display, f"{total_holdings}", f"{controversy_count}"],
             # Descriptions
             [f"{esg_rating}", "Return on Investment Capital", "Companies Analyzed", controversy_status]
         ]
