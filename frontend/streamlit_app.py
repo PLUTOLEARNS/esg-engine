@@ -17,6 +17,7 @@ load_dotenv()
 
 # Configuration
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Add Groq API key
 CACHE_DURATION = timedelta(minutes=30)
 
 # Page configuration
@@ -342,6 +343,123 @@ def get_controversy_data(ticker: str):
     except:
         return {"ticker": ticker, "controversies": []}
 
+def get_groq_analysis(prompt: str, max_tokens: int = 500) -> str:
+    """Get AI-powered analysis using Groq API."""
+    if not GROQ_API_KEY:
+        return "AI analysis not available (API key not configured)"
+    
+    try:
+        import requests
+        import json
+        
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an expert ESG (Environmental, Social, Governance) investment analyst specializing in Indian markets. Provide professional, actionable insights in a concise format suitable for investment reports."
+                },
+                {
+                    "role": "user", 
+                    "content": prompt
+                }
+            ],
+            "model": "llama3-8b-8192",
+            "max_tokens": max_tokens,
+            "temperature": 0.3
+        }
+        
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            return result["choices"][0]["message"]["content"].strip()
+        else:
+            return f"AI analysis unavailable (API error: {response.status_code})"
+            
+    except Exception as e:
+        return f"AI analysis unavailable ({str(e)})"
+
+def generate_risk_assessment(portfolio_data, controversy_count, portfolio_esg, portfolio_roic):
+    """Generate intelligent risk assessment using Groq AI."""
+    
+    # Prepare portfolio context for AI
+    holdings_summary = []
+    total_market_cap = 0
+    
+    for holding in portfolio_data:
+        if holding.get('ticker') != 'PORTFOLIO_TOTAL':
+            ticker = holding.get('ticker', '').replace('.NS', '').replace('.BO', '')
+            weight = holding.get('weight', 0) * 100
+            esg_score = holding.get('esg_score', 0)
+            data_source = holding.get('data_source', '')
+            market_cap = holding.get('market_cap', 0)
+            total_market_cap += market_cap
+            
+            status = ""
+            if 'replacement' in data_source:
+                status = " (delisted/replacement data)"
+            elif 'sector_defaults' in data_source:
+                status = " (sector estimates)"
+            
+            holdings_summary.append(f"{ticker}: {weight:.1f}% weight, ESG {esg_score:.1f}{status}")
+    
+    portfolio_context = f"""
+    Portfolio Analysis Context:
+    - Total Holdings: {len([h for h in portfolio_data if h.get('ticker') != 'PORTFOLIO_TOTAL'])}
+    - Portfolio ESG Score: {portfolio_esg:.1f}/100
+    - Portfolio ROIC: {portfolio_roic*100:.1f}%
+    - Total Market Cap: ₹{total_market_cap/1e12:.2f} trillion
+    - Controversies Detected: {controversy_count}
+    - Holdings: {'; '.join(holdings_summary[:5])}...
+    
+    Generate a professional risk assessment covering:
+    1. Current risk level and key concerns
+    2. Specific portfolio vulnerabilities 
+    3. Actionable recommendations
+    4. Timeline for implementation
+    5. Monitoring requirements
+    
+    Focus on Indian market context, regulatory environment, and ESG trends.
+    """
+    
+    return get_groq_analysis(portfolio_context, max_tokens=800)
+
+def generate_metric_explanation(metric_name: str, value: float, portfolio_data) -> str:
+    """Generate AI explanation for specific metrics."""
+    
+    context_prompts = {
+        'esg_score': f"""
+        Explain why this Indian portfolio has an ESG score of {value:.1f}/100. 
+        Consider the holdings, sector composition, and Indian ESG landscape.
+        Provide 2-3 specific factors driving this score and what it means for investors.
+        """,
+        'roic': f"""
+        Analyze this portfolio's ROIC of {value*100:.1f}% in the context of Indian markets.
+        Compare to typical Indian equity returns, explain what drives this performance,
+        and assess sustainability of these returns.
+        """,
+        'risk_profile': f"""
+        Assess the overall risk profile of this Indian equity portfolio based on ESG score {portfolio_data[0]:.1f}, 
+        ROIC {portfolio_data[1]*100:.1f}%, and market composition.
+        Focus on concentration risk, sector exposure, and ESG-related risks.
+        """
+    }
+    
+    if metric_name in context_prompts:
+        return get_groq_analysis(context_prompts[metric_name], max_tokens=300)
+    else:
+        return "Detailed analysis available with AI integration."
+
 def create_kpi_cards(summary_data, controversy_count, portfolio_data=None, theme="light"):
     """Create KPI cards with traffic light colors and proper metric calculation."""
     col1, col2, col3 = st.columns(3)
@@ -404,6 +522,12 @@ def create_kpi_cards(summary_data, controversy_count, portfolio_data=None, theme
             <div style="font-size: 0.9rem; margin-top: 0.5rem;">{status}</div>
         </div>
         """, unsafe_allow_html=True)
+        
+        # AI explanation for ESG score
+        if st.button("🤖 Explain ESG Score", key="esg_explain"):
+            with st.spinner("Generating AI analysis..."):
+                explanation = generate_metric_explanation('esg_score', esg_score, portfolio_data)
+                st.info(f"**ESG Score Analysis:** {explanation}")
     
     with col2:
         roic = portfolio_roic * 100
@@ -418,6 +542,12 @@ def create_kpi_cards(summary_data, controversy_count, portfolio_data=None, theme
             <div style="font-size: 0.9rem; margin-top: 0.5rem;">{roic_status}</div>
         </div>
         """, unsafe_allow_html=True)
+        
+        # AI explanation for ROIC
+        if st.button("🤖 Explain ROIC", key="roic_explain"):
+            with st.spinner("Generating AI analysis..."):
+                explanation = generate_metric_explanation('roic', portfolio_roic, portfolio_data)
+                st.info(f"**ROIC Analysis:** {explanation}")
     
     with col3:
         color_class = "metric-red" if controversy_count > 0 else "metric-green"
@@ -430,6 +560,12 @@ def create_kpi_cards(summary_data, controversy_count, portfolio_data=None, theme
             <div style="font-size: 0.9rem; margin-top: 0.5rem;">{status}</div>
         </div>
         """, unsafe_allow_html=True)
+        
+        # AI explanation for risk profile
+        if st.button("🤖 Risk Analysis", key="risk_explain"):
+            with st.spinner("Generating AI analysis..."):
+                explanation = generate_metric_explanation('risk_profile', 0, [portfolio_esg, portfolio_roic])
+                st.info(f"**Risk Profile Analysis:** {explanation}")
 
 def create_radar_chart(portfolio_data, theme="light"):
     """Create radar chart comparing portfolio vs market benchmark."""
@@ -770,7 +906,7 @@ def generate_pdf_report(portfolio_data, summary_data, controversy_count):
         story.append(title)
         
         subtitle = Paragraph(
-            f"<b>India Edition</b> | Generated on {datetime.now().strftime('%B %d, %Y')}<br/>Professional Investment Analysis for Indian Markets",
+            f"<b>भारत Edition</b> | Generated on {datetime.now().strftime('%B %d, %Y')}<br/>Professional Investment Analysis for Indian Markets",
             subtitle_style
         )
         story.append(subtitle)
@@ -1004,33 +1140,18 @@ def generate_pdf_report(portfolio_data, summary_data, controversy_count):
         risk_title = Paragraph("Risk Assessment & Recommendations", section_style)
         story.append(risk_title)
         
-        # Risk summary with better formatting
-        if controversy_count > 0:
-            risk_status = "High Risk"
-            risk_bg_color = colors['danger']
-            risk_text_color = white
-            risk_description = f"""
-            <b>Status:</b> {controversy_count} controversy(ies) detected in portfolio holdings.<br/>
-            <b>Impact:</b> Potential reputational, regulatory, and financial risks affecting long-term performance.<br/>
-            <b>Recommendation:</b> Immediate review of ESG policies and strategic rebalancing of affected positions.<br/>
-            <b>Action Items:</b> Conduct comprehensive due diligence, engage with management, assess materiality.<br/>
-            <b>Timeline:</b> Implement risk mitigation strategies within 30-60 days of detection.
-            """
-        else:
-            risk_status = "Low Risk"
-            risk_bg_color = colors['success']
-            risk_text_color = white
-            risk_description = """
-            <b>Status:</b> No significant controversies detected in current holdings.<br/>
-            <b>Assessment:</b> Portfolio demonstrates strong ESG compliance and risk management.<br/>
-            <b>Recommendation:</b> Continue monitoring emerging ESG risks and maintain current standards.<br/>
-            <b>Action Items:</b> Implement quarterly ESG review process and stakeholder engagement.<br/>
-            <b>Future Focus:</b> Consider climate transition risks and social impact measurement.
-            """
+        # Generate AI-powered risk assessment
+        with st.spinner("Generating AI-powered risk assessment..."):
+            ai_risk_analysis = generate_risk_assessment(portfolio_data, controversy_count, portfolio_esg, portfolio_roic)
+        
+        # Create professional risk assessment layout
+        risk_level = "High Risk" if controversy_count > 0 or portfolio_esg < 30 else "Medium Risk" if portfolio_esg < 50 else "Low Risk"
+        risk_bg_color = colors['danger'] if risk_level == "High Risk" else colors['accent'] if risk_level == "Medium Risk" else colors['success']
+        risk_text_color = white
         
         risk_data = [
-            [f"Risk Level: {risk_status}"],
-            [risk_description]
+            [f"Risk Level: {risk_level}"],
+            [clean_text_for_pdf(ai_risk_analysis)]
         ]
         
         risk_table = Table(risk_data, colWidths=[180*mm])
@@ -1053,11 +1174,11 @@ def generate_pdf_report(portfolio_data, summary_data, controversy_count):
         story.append(risk_table)
         story.append(Spacer(1, 15*mm))
         
-        # Footer Section
+        # Footer Section with proper Unicode
         footer_text = f"""
         <b>ESG Engine - भारत Edition</b> | Professional Investment Analysis Platform<br/>
         <i>Total Portfolio Value: ₹{total_market_cap:.2f} Trillion • Analysis Date: {datetime.now().strftime('%Y-%m-%d')}</i><br/>
-        <i>Data sources: Yahoo Finance & Financial data providers</i><br/>
+        <i>Data sources: Yahoo Finance & Financial data providers • AI-powered by Groq</i><br/>
         <i>Disclaimer: This report is for informational purposes only. Please conduct additional due diligence.</i>
         """
         
@@ -1237,6 +1358,42 @@ def main():
         # Data table
         st.subheader("📋 Portfolio Holdings")
         create_portfolio_datatable(portfolio_data)
+        
+        # AI-Powered Insights Section
+        if GROQ_API_KEY:
+            st.subheader("🤖 AI-Powered Portfolio Insights")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("📊 Generate Portfolio Analysis", type="secondary"):
+                    with st.spinner("AI is analyzing your portfolio..."):
+                        analysis = generate_risk_assessment(portfolio_data, total_controversies, summary_data.get('portfolio_weighted_esg', 0), summary_data.get('portfolio_weighted_roic', 0))
+                        st.markdown("### 🔍 Comprehensive Portfolio Analysis")
+                        st.info(analysis)
+            
+            with col2:
+                # Quick insight buttons
+                insight_type = st.selectbox(
+                    "Quick AI Insights:",
+                    ["Select analysis type...", "ESG Score Deep Dive", "ROIC Performance", "Risk Profile", "Sector Analysis"]
+                )
+                
+                if insight_type != "Select analysis type..." and st.button("🚀 Get Insight"):
+                    with st.spinner(f"Analyzing {insight_type}..."):
+                        if insight_type == "ESG Score Deep Dive":
+                            insight = generate_metric_explanation('esg_score', summary_data.get('portfolio_weighted_esg', 0), portfolio_data)
+                        elif insight_type == "ROIC Performance":
+                            insight = generate_metric_explanation('roic', summary_data.get('portfolio_weighted_roic', 0), portfolio_data)
+                        elif insight_type == "Risk Profile":
+                            insight = generate_metric_explanation('risk_profile', 0, [summary_data.get('portfolio_weighted_esg', 0), summary_data.get('portfolio_weighted_roic', 0)])
+                        else:
+                            insight = "Advanced sector analysis coming soon!"
+                        
+                        st.markdown(f"### 📈 {insight_type}")
+                        st.success(insight)
+        else:
+            st.info("💡 **Pro Tip:** Add your Groq API key to enable AI-powered portfolio insights and explanations!")
         
         # PDF Download
         st.subheader("📄 Export Professional Report")
