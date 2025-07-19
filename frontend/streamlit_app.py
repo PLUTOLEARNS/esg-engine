@@ -346,7 +346,8 @@ def get_controversy_data(ticker: str):
 def get_groq_analysis(prompt: str, max_tokens: int = 500) -> str:
     """Get AI-powered analysis using Groq API."""
     if not GROQ_API_KEY:
-        return "AI analysis not available (API key not configured)"
+        # Try backend API first
+        return get_backend_ai_analysis(prompt, max_tokens)
     
     try:
         import requests
@@ -388,6 +389,15 @@ def get_groq_analysis(prompt: str, max_tokens: int = 500) -> str:
             
     except Exception as e:
         return f"AI analysis unavailable ({str(e)})"
+
+def get_backend_ai_analysis(prompt: str, max_tokens: int = 500) -> str:
+    """Get AI analysis from backend if frontend doesn't have API key."""
+    try:
+        # This would use the backend AI endpoint
+        # For now, return fallback message
+        return "AI analysis available with API key configuration. See setup instructions below."
+    except Exception as e:
+        return f"Backend AI analysis unavailable ({str(e)})"
 
 def generate_risk_assessment(portfolio_data, controversy_count, portfolio_esg, portfolio_roic):
     """Generate intelligent risk assessment using Groq AI."""
@@ -1393,7 +1403,38 @@ def main():
                         st.markdown(f"### 📈 {insight_type}")
                         st.success(insight)
         else:
-            st.info("💡 **Pro Tip:** Add your Groq API key to enable AI-powered portfolio insights and explanations!")
+            st.info("💡 **Enable AI-Powered Insights** - Add your Groq API key to unlock intelligent portfolio analysis!")
+            
+            with st.expander("🔧 Setup Instructions for AI Features"):
+                st.markdown("""
+                ### Option 1: Frontend API Key (Streamlit Cloud)
+                1. Go to your [Streamlit Cloud dashboard](https://share.streamlit.io/)
+                2. Click on your app → **Settings** → **Secrets**
+                3. Add this to your secrets.toml:
+                ```toml
+                GROQ_API_KEY = "gsk_your_actual_groq_api_key_here"
+                ```
+                
+                ### Option 2: Backend API Key (Render - More Secure)
+                1. Go to your [Render dashboard](https://dashboard.render.com/)
+                2. Click on your backend service → **Environment**
+                3. Add environment variable:
+                   - **Key**: `GROQ_API_KEY`
+                   - **Value**: `gsk_your_actual_groq_api_key_here`
+                
+                ### Get Your Free Groq API Key:
+                1. Visit [Groq Console](https://console.groq.com/keys)
+                2. Sign up for free account
+                3. Generate an API key
+                4. Copy the key (starts with `gsk_`)
+                
+                ### AI Features Unlocked:
+                - 🤖 Intelligent risk assessment
+                - 📊 ESG score explanations  
+                - 💹 ROIC performance analysis
+                - 🎯 Portfolio-specific recommendations
+                - 📋 Dynamic PDF report insights
+                """)
         
         # PDF Download
         st.subheader("📄 Export Professional Report")

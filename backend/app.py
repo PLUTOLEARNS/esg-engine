@@ -8,6 +8,8 @@ from pydantic import BaseModel
 from typing import List
 import os
 from dotenv import load_dotenv
+import requests
+import json
 
 load_dotenv()
 
@@ -42,6 +44,21 @@ class ControversyResponse(BaseModel):
     """Response model for controversy flags."""
     ticker: str
     controversies: List[dict]
+
+
+class AIAnalysisRequest(BaseModel):
+    """Request model for AI analysis."""
+    portfolio_data: List[dict]
+    portfolio_esg: float
+    portfolio_roic: float
+    controversy_count: int
+
+
+class AIAnalysisResponse(BaseModel):
+    """Response model for AI analysis."""
+    risk_assessment: str
+    esg_explanation: str
+    roic_explanation: str
 
 
 @app.get("/")
