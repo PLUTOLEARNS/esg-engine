@@ -29,38 +29,72 @@ st.set_page_config(
 )
 
 # Custom CSS for better styling
-def load_css():
-    """Load custom CSS styles."""
-    st.markdown("""
+def load_css(dark_mode=False):
+    """Load custom CSS styles with theme support."""
+    
+    # Base colors for light/dark theme
+    if dark_mode:
+        bg_color = "#0E1117"
+        secondary_bg = "#262730"
+        text_color = "#FAFAFA"
+        border_color = "#30363D"
+        card_bg = "#1E1E1E"
+    else:
+        bg_color = "#FFFFFF"
+        secondary_bg = "#F0F2F6"
+        text_color = "#262730"
+        border_color = "#E6EAF1"
+        card_bg = "#FFFFFF"
+    
+    st.markdown(f"""
     <style>
-    .metric-card {
-        background-color: var(--background-color);
+    .stApp {{
+        background-color: {bg_color};
+        color: {text_color};
+    }}
+    
+    .metric-card {{
+        background-color: {card_bg};
         padding: 1rem;
         border-radius: 0.5rem;
-        border: 1px solid var(--secondary-background-color);
+        border: 1px solid {border_color};
         margin: 0.5rem 0;
-    }
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }}
     
-    .metric-title {
+    .metric-title {{
         font-size: 0.8rem;
-        color: var(--text-color);
+        color: {text_color};
         margin-bottom: 0.5rem;
-    }
+        opacity: 0.8;
+    }}
     
-    .metric-value {
+    .metric-value {{
         font-size: 2rem;
         font-weight: bold;
         margin: 0;
-    }
+    }}
     
-    .metric-green { color: #28a745; }
-    .metric-yellow { color: #ffc107; }
-    .metric-red { color: #dc3545; }
+    .metric-green {{ color: #28a745; }}
+    .metric-yellow {{ color: #ffc107; }}
+    .metric-red {{ color: #dc3545; }}
     
-    .stDataFrame {
-        border: 1px solid var(--secondary-background-color);
+    .stDataFrame {{
+        border: 1px solid {border_color};
         border-radius: 0.5rem;
-    }
+        background-color: {card_bg};
+    }}
+    
+    .stSelectbox > div > div {{
+        background-color: {card_bg};
+        border-color: {border_color};
+    }}
+    
+    .stButton > button {{
+        background-color: {secondary_bg};
+        border-color: {border_color};
+        color: {text_color};
+    }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -279,7 +313,7 @@ def ingest_portfolio_data(tickers: list, weights: list):
             "weights": weights
         }
         
-        with st.spinner("🔄 Ingesting fresh data for portfolio..."):
+        with st.spinner("🔄 Refreshing data for portfolio companies..."):
             response = requests.post(
                 f"{BACKEND_URL}/ingest",
                 json=request_data,
@@ -289,58 +323,93 @@ def ingest_portfolio_data(tickers: list, weights: list):
             if response.status_code == 200:
                 result = response.json()
                 
-                st.success("✅ Data ingestion completed!")
+                st.success("✅ Data refresh completed!")
                 
                 # Show detailed results
-                ingestion_data = result.get('results', {})
+                ingestion_results = result.get('results', {})
+                success_rate = result.get('success_rate', 0)
                 
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
+                    successful = len(ingestion_results.get('successful_ingests', []))
                     st.metric(
-                        "✅ Successful",
-                        len(ingestion_data.get('successful_ingests', []))
+                        "✅ Successfully Refreshed",
+                        successful
                     )
                 
                 with col2:
+                    updated = len(ingestion_results.get('updated_companies', []))
                     st.metric(
-                        "🔄 Updated", 
-                        len(ingestion_data.get('updated_companies', []))
+                        "🔄 Data Updated", 
+                        updated
                     )
                 
                 with col3:
+                    failed = len(ingestion_results.get('failed_ingests', []))
                     st.metric(
-                        "❌ Failed",
-                        len(ingestion_data.get('failed_ingests', []))
+                        "❌ Failed to Update",
+                        failed
                     )
                 
-                # Show problematic tickers
-                if ingestion_data.get('delisted_companies'):
-                    st.warning(f"⚠️ **Delisted companies detected:** {', '.join(ingestion_data['delisted_companies'])}")
+                # Show success rate
+                st.info(f"📊 **Overall Success Rate:** {success_rate*100:.1f}%")
                 
-                if ingestion_data.get('errors'):
-                    with st.expander("🔍 View ingestion errors"):
-                        for error in ingestion_data['errors'][:5]:
+                # Show more detailed breakdown
+                if ingestion_results.get('data_quality_report'):
+                    report = ingestion_results['data_quality_report'][0] if ingestion_results['data_quality_report'] else {}
+                    if report:
+                        st.write("**Data Quality Details:**")
+                        for key, value in report.items():
+                            if key != 'success_rate':
+                                st.write(f"• {key.replace('_', ' ').title()}: {value}")
+                
+                # Show problematic tickers with better formatting
+                if ingestion_results.get('delisted_companies'):
+                    st.warning(f"⚠️ **Delisted/Problematic Companies:** {', '.join(ingestion_results['delisted_companies'][:3])}...")
+                
+                if ingestion_results.get('errors'):
+                    with st.expander("🔍 View detailed errors"):
+                        for error in ingestion_results['errors'][:5]:
                             st.write(f"• {error}")
+                
+                # Explain why some metrics might be 0
+                if successful == 0 and updated == 0:
+                    st.info("💡 **Note:** If all metrics show 0, it might mean:\n- Data is already up-to-date\n- Companies are using cached/sector default data\n- Some tickers may not be available in the data source")
                 
                 return result
                 
             else:
-                st.error(f"❌ Ingestion failed: {response.status_code} - {response.text}")
+                st.error(f"❌ Data refresh failed: {response.status_code} - {response.text}")
                 return None
                 
     except Exception as e:
-        st.error(f"💥 Ingestion error: {str(e)}")
+        st.error(f"💥 Data refresh error: {str(e)}")
         return None
 
 def get_controversy_data(ticker: str):
-    """Get controversy data for a ticker."""
+    """Get controversy data for a ticker with better error handling."""
     try:
-        response = requests.get(f"{BACKEND_URL}/flags/{ticker}", timeout=10)
+        # Clean the ticker for API call
+        clean_ticker = ticker.upper().strip()
+        
+        response = requests.get(f"{BACKEND_URL}/flags/{clean_ticker}", timeout=15)
         if response.status_code == 200:
-            return response.json()
-        return {"ticker": ticker, "controversies": []}
-    except:
+            data = response.json()
+            controversies = data.get('controversies', [])
+            
+            # Debug logging for Adani case
+            if 'ADANI' in clean_ticker.upper():
+                st.write(f"🔍 Debug: {clean_ticker} returned {len(controversies)} controversies")
+                if controversies:
+                    st.write(f"Sample controversy: {controversies[0]}")
+            
+            return {"ticker": clean_ticker, "controversies": controversies}
+        else:
+            st.warning(f"⚠️ Controversy check failed for {clean_ticker}: {response.status_code}")
+            return {"ticker": clean_ticker, "controversies": []}
+    except Exception as e:
+        st.warning(f"⚠️ Error checking controversies for {ticker}: {str(e)}")
         return {"ticker": ticker, "controversies": []}
 
 def get_groq_analysis(prompt: str, max_tokens: int = 500) -> str:
@@ -402,18 +471,22 @@ def get_backend_ai_analysis(prompt: str, max_tokens: int = 500) -> str:
 def generate_risk_assessment(portfolio_data, controversy_count, portfolio_esg, portfolio_roic):
     """Generate intelligent risk assessment using Groq AI."""
     
+    # Handle case where portfolio_data might be empty or invalid
+    if not portfolio_data or not isinstance(portfolio_data, list):
+        portfolio_data = []
+    
     # Prepare portfolio context for AI
     holdings_summary = []
     total_market_cap = 0
     
     for holding in portfolio_data:
-        if holding.get('ticker') != 'PORTFOLIO_TOTAL':
+        if isinstance(holding, dict) and holding.get('ticker') != 'PORTFOLIO_TOTAL':
             ticker = holding.get('ticker', '').replace('.NS', '').replace('.BO', '')
             weight = holding.get('weight', 0) * 100
             esg_score = holding.get('esg_score', 0)
-            data_source = holding.get('data_source', '')
+            data_source = str(holding.get('data_source', ''))  # Ensure string type
             market_cap = holding.get('market_cap', 0)
-            total_market_cap += market_cap
+            total_market_cap += market_cap if market_cap else 0
             
             status = ""
             if 'replacement' in data_source:
@@ -425,24 +498,22 @@ def generate_risk_assessment(portfolio_data, controversy_count, portfolio_esg, p
     
     portfolio_context = f"""
     Portfolio Analysis Context:
-    - Total Holdings: {len([h for h in portfolio_data if h.get('ticker') != 'PORTFOLIO_TOTAL'])}
+    - Total Holdings: {len([h for h in portfolio_data if isinstance(h, dict) and h.get('ticker') != 'PORTFOLIO_TOTAL'])}
     - Portfolio ESG Score: {portfolio_esg:.1f}/100
     - Portfolio ROIC: {portfolio_roic*100:.1f}%
     - Total Market Cap: ₹{total_market_cap/1e12:.2f} trillion
     - Controversies Detected: {controversy_count}
-    - Holdings: {'; '.join(holdings_summary[:5])}...
+    - Top Holdings: {'; '.join(holdings_summary[:3])}
     
-    Generate a professional risk assessment covering:
-    1. Current risk level and key concerns
-    2. Specific portfolio vulnerabilities 
-    3. Actionable recommendations
-    4. Timeline for implementation
-    5. Monitoring requirements
+    Provide a CONCISE 2-3 sentence risk assessment focusing on:
+    1. Overall risk level (Low/Medium/High)
+    2. Main concern or opportunity
+    3. One actionable recommendation
     
-    Focus on Indian market context, regulatory environment, and ESG trends.
+    Keep response under 100 words for Indian market context.
     """
     
-    return get_groq_analysis(portfolio_context, max_tokens=800)
+    return get_groq_analysis(portfolio_context, max_tokens=150)
 
 def generate_metric_explanation(metric_name: str, value: float, portfolio_data) -> str:
     """Generate AI explanation for specific metrics."""
@@ -459,24 +530,21 @@ def generate_metric_explanation(metric_name: str, value: float, portfolio_data) 
     
     context_prompts = {
         'esg_score': f"""
-        Explain why this Indian portfolio has an ESG score of {value:.1f}/100. 
-        Consider the holdings, sector composition, and Indian ESG landscape.
-        Provide 2-3 specific factors driving this score and what it means for investors.
+        Explain this Indian portfolio's ESG score of {value:.1f}/100 in 2-3 sentences.
+        What drives this score and what it means for investors? Keep under 80 words.
         """,
         'roic': f"""
-        Analyze this portfolio's ROIC of {value*100:.1f}% in the context of Indian markets.
-        Compare to typical Indian equity returns, explain what drives this performance,
-        and assess sustainability of these returns.
+        Analyze this portfolio's ROIC of {value*100:.1f}% for Indian markets in 2-3 sentences.
+        How does this compare to market average and is it sustainable? Keep under 80 words.
         """,
         'risk_profile': f"""
-        Assess the overall risk profile of this Indian equity portfolio based on ESG score {portfolio_esg:.1f}/100, 
-        ROIC {portfolio_roic*100:.1f}%, and market composition.
-        Focus on concentration risk, sector exposure, and ESG-related risks.
+        Assess risk level based on ESG {portfolio_esg:.1f}/100 and ROIC {portfolio_roic*100:.1f}% in 2-3 sentences.
+        Main risks and opportunities? Keep under 80 words.
         """
     }
     
     if metric_name in context_prompts:
-        return get_groq_analysis(context_prompts[metric_name], max_tokens=300)
+        return get_groq_analysis(context_prompts[metric_name], max_tokens=120)
     else:
         return "Detailed analysis available with AI integration."
 
@@ -1227,14 +1295,21 @@ def generate_pdf_report(portfolio_data, summary_data, controversy_count):
 
 # Main app
 def main():
-    load_css()
-    
     # Sidebar
     st.sidebar.title("🌱 ESG Engine")
     
     # Theme toggle
-    dark_mode = st.sidebar.toggle("Dark Mode", value=False)
+    dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=False)
     theme = "dark" if dark_mode else "light"
+    
+    # Clear cache button
+    if st.sidebar.button("🗑️ Clear Cache"):
+        st.session_state.clear()
+        st.success("Cache cleared! Upload a new portfolio.")
+        st.rerun()
+    
+    # Load CSS with theme
+    load_css(dark_mode)
     
     # Check backend health
     if not check_backend_health():
@@ -1329,11 +1404,10 @@ def main():
                     if result:
                         st.session_state.portfolio_result = result
                         st.session_state.upload_time = datetime.now()
-                        st.session_state.analysis_type = "Enhanced" if use_enhanced else "Standard"
-                        st.success("✅ Portfolio analyzed successfully!")
-                        st.rerun()  # Refresh to show results immediately
+                        st.success("✅ Portfolio analysis completed! Check results below.")
+                        st.rerun()  # Refresh to show results
                     else:
-                        st.error("❌ Failed to analyze portfolio")
+                        st.error("❌ Portfolio analysis failed. Please try again.")
                         
         except Exception as e:
             st.error(f"❌ Error processing file: {str(e)}")
@@ -1386,18 +1460,68 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.button("📊 Generate Portfolio Analysis", type="secondary"):
+                if st.button("📊 Generate Portfolio Analysis", type="secondary", key="portfolio_analysis_btn"):
                     with st.spinner("AI is analyzing your portfolio..."):
-                        analysis = generate_risk_assessment(portfolio_data, total_controversies, summary_data.get('portfolio_weighted_esg', 0), summary_data.get('portfolio_weighted_roic', 0))
-                        st.markdown("### 🔍 Comprehensive Portfolio Analysis")
-                        st.info(analysis)
+                        # Use calculated values instead of summary data
+                        portfolio_esg = 0
+                        portfolio_roic = 0
+                        total_weight = 0
+                        
+                        for holding in portfolio_data:
+                            if holding.get('ticker') != 'PORTFOLIO_TOTAL':
+                                weight = holding.get('weight', 0)
+                                esg_score = holding.get('esg_score', 0)
+                                roic = holding.get('roic', 0)
+                                
+                                if weight > 0 and esg_score > 0:
+                                    portfolio_esg += weight * esg_score
+                                    total_weight += weight
+                                
+                                if weight > 0 and roic > 0:
+                                    portfolio_roic += weight * roic
+                        
+                        portfolio_esg = portfolio_esg / total_weight if total_weight > 0 else summary_data.get('portfolio_weighted_esg', 0)
+                        portfolio_roic = portfolio_roic if portfolio_roic > 0 else summary_data.get('portfolio_weighted_roic', 0)
+                        
+                        analysis = generate_risk_assessment(portfolio_data, total_controversies, portfolio_esg, portfolio_roic)
+                        
+                        # Store in session state to prevent disappearing
+                        st.session_state['portfolio_analysis'] = analysis
+            
+            # Display stored analysis if it exists
+            if 'portfolio_analysis' in st.session_state:
+                st.markdown("### 🔍 Portfolio Analysis")
+                st.info(st.session_state['portfolio_analysis'])
             
             with col2:
-                # Quick insight buttons
+                # Quick insight buttons with session state
                 insight_type = st.selectbox(
                     "Quick AI Insights:",
-                    ["Select analysis type...", "ESG Score Deep Dive", "ROIC Performance", "Risk Profile", "Sector Analysis"]
+                    ["Select analysis type...", "ESG Score Deep Dive", "ROIC Performance", "Risk Profile", "Sector Analysis"],
+                    key="insight_selector"
                 )
+                
+                if insight_type != "Select analysis type..." and st.button("🔍 Get Insight", key="quick_insight_btn"):
+                    with st.spinner("Generating insight..."):
+                        # Store insight in session state
+                        if insight_type == "ESG Score Deep Dive":
+                            insight = generate_metric_explanation('esg_score', portfolio_esg, portfolio_data)
+                        elif insight_type == "ROIC Performance":
+                            insight = generate_metric_explanation('roic', portfolio_roic, portfolio_data)
+                        elif insight_type == "Risk Profile":
+                            insight = generate_metric_explanation('risk_profile', 0, [portfolio_esg, portfolio_roic])
+                        else:
+                            insight = "Analysis feature coming soon!"
+                        
+                        st.session_state['quick_insight'] = {
+                            'type': insight_type,
+                            'content': insight
+                        }
+                
+                # Display stored quick insight
+                if 'quick_insight' in st.session_state:
+                    st.markdown(f"### 📈 {st.session_state['quick_insight']['type']}")
+                    st.success(st.session_state['quick_insight']['content'])
                 
                 if insight_type != "Select analysis type..." and st.button("🚀 Get Insight"):
                     with st.spinner(f"Analyzing {insight_type}..."):
