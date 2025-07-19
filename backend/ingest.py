@@ -5,7 +5,7 @@ Usage: python -m backend.ingest AAPL,MSFT,NVDA
 import sys
 import asyncio
 from datetime import datetime
-from typing import List
+from typing import List, Dict, Optional, Union, Any, cast
 from pathlib import Path
 
 # Add project root to path for imports
@@ -87,23 +87,30 @@ async def ingest_ticker(ticker: str, db: ESGDB) -> None:
         esg_task = fetch_esg(ticker)
         financials_task = fetch_financials(ticker)
         
-        esg_data, financials_data = await asyncio.gather(
+        results = await asyncio.gather(
             esg_task, financials_task, return_exceptions=True
         )
         
-        # Handle exceptions
-        if isinstance(esg_data, Exception):
-            print(f"Error fetching ESG data for {ticker}: {esg_data}")
-            esg_data = None
+        # Handle exceptions and ensure proper typing
+        esg_data_result, financials_data_result = results[0], results[1]
         
-        if isinstance(financials_data, Exception):
-            print(f"Error fetching financial data for {ticker}: {financials_data}")
-            financials_data = None
-        # Parse and store data
-        record = parse_esg_data(esg_data, financials_data, ticker)
-        db.upsert_esg_record(record)
+        # Properly type cast to handle Exception types
+        esg_data: Optional[Dict[str, Any]] = None if isinstance(esg_data_result, Exception) else cast(Optional[Dict[str, Any]], esg_data_result)
+        financials_data: Optional[Dict[str, Any]] = None if isinstance(financials_data_result, Exception) else cast(Optional[Dict[str, Any]], financials_data_result)
         
-        print(f"Successfully ingested data for {ticker}")
+        if isinstance(esg_data_result, Exception):
+            print(f"Error fetching ESG data for {ticker}: {esg_data_result}")
+        
+        if isinstance(financials_data_result, Exception):
+            print(f"Error fetching financial data for {ticker}: {financials_data_result}")
+            
+        # Parse and store data only if we have valid data
+        if esg_data is not None or financials_data is not None:
+            record = parse_esg_data(esg_data, financials_data, ticker)
+            db.upsert_esg_record(record)
+            print(f"Successfully ingested data for {ticker}")
+        else:
+            print(f"No valid data to ingest for {ticker}")
         
     except Exception as e:
         print(f"Failed to ingest data for {ticker}: {e}")

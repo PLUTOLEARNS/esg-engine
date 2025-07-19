@@ -100,6 +100,135 @@ def upload_and_rank_portfolio(df: pd.DataFrame):
         st.error(f"Unexpected error: {str(e)}")
         return None
 
+
+def upload_and_rank_portfolio_enhanced(df: pd.DataFrame, show_ingestion_details: bool = False):
+    """
+    Enhanced portfolio ranking with automatic data ingestion and robustness features.
+    Handles delisted companies, missing data, and provides detailed ingestion feedback.
+    """
+    try:
+        # Prepare request data
+        request_data = {
+            "tickers": df['ticker'].tolist(),
+            "weights": df['weight'].tolist()
+        }
+        
+        # Show loading message
+        with st.spinner("🔄 Analyzing portfolio with enhanced data fetching..."):
+            # Use enhanced ranking endpoint with auto-ingestion
+            response = requests.post(
+                f"{BACKEND_URL}/rank_enhanced",
+                json=request_data,
+                timeout=60  # Longer timeout for data fetching
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                # Show ingestion details if requested
+                if show_ingestion_details:
+                    st.success("✅ Enhanced portfolio analysis completed!")
+                    
+                    # Add data source information
+                    data_sources = {}
+                    for holding in result.get('data', []):
+                        source = holding.get('data_source', 'unknown')
+                        data_sources[source] = data_sources.get(source, 0) + 1
+                    
+                    if data_sources:
+                        st.info("📊 **Data Sources Used:**")
+                        for source, count in data_sources.items():
+                            if 'yahoo_finance' in source:
+                                st.write(f"   📈 Yahoo Finance: {count} companies")
+                            elif 'replacement' in source:
+                                st.write(f"   🔄 Replacement data: {count} companies")
+                            elif 'sector_defaults' in source:
+                                st.write(f"   🏭 Sector defaults: {count} companies")
+                            elif 'error' in source:
+                                st.write(f"   ❌ Errors: {count} companies")
+                
+                return result
+            else:
+                st.error(f"❌ Enhanced ranking failed: {response.status_code} - {response.text}")
+                return None
+                
+    except requests.exceptions.RequestException as e:
+        st.error(f"🌐 Network error: {str(e)}")
+        
+        # Fallback to regular ranking
+        st.info("🔄 Falling back to regular portfolio ranking...")
+        return upload_and_rank_portfolio(df)
+        
+    except Exception as e:
+        st.error(f"💥 Unexpected error: {str(e)}")
+        return None
+
+
+def ingest_portfolio_data(tickers: list, weights: list):
+    """
+    Trigger manual data ingestion for portfolio tickers.
+    Useful for testing new companies or refreshing data.
+    """
+    try:
+        request_data = {
+            "tickers": tickers,
+            "weights": weights
+        }
+        
+        with st.spinner("🔄 Ingesting fresh data for portfolio..."):
+            response = requests.post(
+                f"{BACKEND_URL}/ingest",
+                json=request_data,
+                timeout=120  # Long timeout for data ingestion
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                st.success("✅ Data ingestion completed!")
+                
+                # Show detailed results
+                ingestion_data = result.get('results', {})
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric(
+                        "✅ Successful",
+                        len(ingestion_data.get('successful_ingests', []))
+                    )
+                
+                with col2:
+                    st.metric(
+                        "🔄 Updated", 
+                        len(ingestion_data.get('updated_companies', []))
+                    )
+                
+                with col3:
+                    st.metric(
+                        "❌ Failed",
+                        len(ingestion_data.get('failed_ingests', []))
+                    )
+                
+                # Show problematic tickers
+                if ingestion_data.get('delisted_companies'):
+                    st.warning(f"⚠️ **Delisted companies detected:** {', '.join(ingestion_data['delisted_companies'])}")
+                
+                if ingestion_data.get('errors'):
+                    with st.expander("🔍 View ingestion errors"):
+                        for error in ingestion_data['errors'][:5]:
+                            st.write(f"• {error}")
+                
+                return result
+                
+            else:
+                st.error(f"❌ Ingestion failed: {response.status_code} - {response.text}")
+                return None
+                
+    except Exception as e:
+        st.error(f"💥 Ingestion error: {str(e)}")
+        return None
+
 def get_controversy_data(ticker: str):
     """Get controversy data for a ticker."""
     try:
@@ -757,14 +886,45 @@ def main():
             else:
                 st.success(f"✅ Weights validated. Sum: {weight_sum:.3f}")
             
+            # Advanced Analysis Options
+            st.subheader("🔧 Analysis Options")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                use_enhanced = st.checkbox(
+                    "🚀 Enhanced Analysis", 
+                    value=True,
+                    help="Uses robust data fetching with fallback for delisted/missing companies"
+                )
+                
+            with col2:
+                show_details = st.checkbox(
+                    "📊 Show Data Sources", 
+                    value=False,
+                    help="Display information about data sources used for each company"
+                )
+            
+            # Manual data ingestion option
+            if st.button("🔄 Refresh Data", help="Manually fetch fresh data for all portfolio companies"):
+                ingestion_result = ingest_portfolio_data(df['ticker'].tolist(), df['weight'].tolist())
+                if ingestion_result:
+                    st.info("� Data refreshed! Now analyze your portfolio to see updated results.")
+            
             # Upload and rank portfolio
-            if st.button("🚀 Analyze Portfolio", type="primary"):
+            analyze_button_text = "🚀 Enhanced Analysis" if use_enhanced else "📊 Standard Analysis"
+            
+            if st.button(analyze_button_text, type="primary"):
                 with st.spinner("Analyzing portfolio..."):
-                    result = upload_and_rank_portfolio(df)
+                    if use_enhanced:
+                        result = upload_and_rank_portfolio_enhanced(df, show_ingestion_details=show_details)
+                    else:
+                        result = upload_and_rank_portfolio(df)
                     
                     if result:
                         st.session_state.portfolio_result = result
                         st.session_state.upload_time = datetime.now()
+                        st.session_state.analysis_type = "Enhanced" if use_enhanced else "Standard"
                         st.success("✅ Portfolio analyzed successfully!")
                         st.rerun()  # Refresh to show results immediately
                     else:

@@ -170,7 +170,10 @@ class TestControversyFlags:
         
         with patch('aiohttp.ClientSession.get') as mock_get:
             mock_response = MagicMock()
-            mock_response.text.return_value = asyncio.coroutine(lambda: mock_rss)()
+            # Use async function instead of deprecated coroutine
+            async def mock_text():
+                return mock_rss
+            mock_response.text = mock_text
             mock_get.return_value.__aenter__.return_value = mock_response
             
             from backend.analytics import flag_controversies
@@ -185,9 +188,10 @@ class TestControversyFlags:
     def test_sync_flag_controversies(self):
         """Test synchronous wrapper for controversy flagging."""
         with patch('backend.analytics.flag_controversies') as mock_async:
-            mock_async.return_value = asyncio.coroutine(lambda: [
-                ("2025-01-15", "Test controversy", "http://example.com")
-            ])()
+            # Use async function instead of deprecated coroutine
+            async def mock_controversies():
+                return [("2025-01-15", "Test controversy", "http://example.com")]
+            mock_async.return_value = mock_controversies()
             
             result = sync_flag_controversies("AAPL") 
             assert len(result) == 1

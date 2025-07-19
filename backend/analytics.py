@@ -11,6 +11,7 @@ import aiohttp
 from aiohttp import ClientTimeout
 import xml.etree.ElementTree as ET
 from backend.db import ESGDB
+from backend.scrapers.yahoo_client import RobustYahooFinanceClient, validate_and_fetch_portfolio
 
 
 def rank_portfolio(df: pd.DataFrame) -> pd.DataFrame:
@@ -230,3 +231,163 @@ def sync_flag_controversies(ticker: str) -> List[Tuple[str, str, str]]:
         asyncio.set_event_loop(loop)
     
     return loop.run_until_complete(flag_controversies(ticker))
+
+
+def auto_ingest_portfolio_data(tickers: List[str], force_refresh: bool = False) -> Dict[str, Any]:
+    """
+    Auto-ingest ESG and financial data for portfolio tickers using robust Yahoo Finance client.
+    Handles delisted companies, missing data, and provides comprehensive fallback strategies.
+    
+    Args:
+        tickers: List of stock ticker symbols
+        force_refresh: If True, fetch fresh data even if already in database
+        
+    Returns:
+        Dictionary with ingestion results and data quality report
+    """
+    print(f"🔄 Starting auto-ingestion for {len(tickers)} tickers...")
+    
+    # Initialize database and Yahoo Finance client
+    db = ESGDB()
+    yahoo_client = RobustYahooFinanceClient()
+    
+    try:
+        ingestion_results = {
+            'successful_ingests': [],
+            'failed_ingests': [],
+            'delisted_companies': [],
+            'updated_companies': [],
+            'skipped_companies': [],
+            'errors': []
+        }
+        
+        # Check existing data in database
+        existing_records = db.get_all_records()
+        existing_tickers = {record['ticker'] for record in existing_records}
+        
+        # Determine which tickers need fetching
+        tickers_to_fetch = []
+        for ticker in tickers:
+            ticker_clean = ticker.upper().strip()
+            if force_refresh or ticker_clean not in existing_tickers:
+                tickers_to_fetch.append(ticker_clean)
+            else:
+                ingestion_results['skipped_companies'].append(ticker_clean)
+                print(f"⏭️  Skipping {ticker_clean} - already in database")
+        
+        if not tickers_to_fetch:
+            print("✅ All tickers already in database. Use force_refresh=True to update.")
+            return ingestion_results
+        
+        print(f"📡 Fetching data for {len(tickers_to_fetch)} new/updated tickers...")
+        
+        # Batch fetch data with comprehensive error handling
+        results, quality_report = validate_and_fetch_portfolio(tickers_to_fetch)
+        
+        # Process results and store in database
+        for ticker, company_data in results.items():
+            try:
+                if company_data.error_message:
+                    ingestion_results['failed_ingests'].append(ticker)
+                    ingestion_results['errors'].append(f"{ticker}: {company_data.error_message}")
+                    print(f"❌ Failed to fetch data for {ticker}: {company_data.error_message}")
+                    continue
+                
+                # Convert CompanyData to database record format
+                record = {
+                    'ticker': company_data.ticker,
+                    'environmental': company_data.environmental,
+                    'social': company_data.social,
+                    'governance': company_data.governance,
+                    'esg_score': company_data.esg_score,
+                    'roic': company_data.roic,
+                    'market_cap': company_data.market_cap,
+                    'last_updated': company_data.last_updated,
+                    'data_source': company_data.data_source,
+                    'is_delisted': company_data.is_delisted
+                }
+                
+                # Store in database using upsert
+                db.upsert_esg_record(record)
+                
+                if ticker in existing_tickers:
+                    ingestion_results['updated_companies'].append(ticker)
+                    print(f"🔄 Updated {ticker} ({company_data.data_source})")
+                else:
+                    ingestion_results['successful_ingests'].append(ticker)
+                    print(f"✅ Ingested {ticker} ({company_data.data_source})")
+                
+                # Track delisted companies
+                if company_data.is_delisted:
+                    ingestion_results['delisted_companies'].append(ticker)
+                    print(f"⚠️  {ticker} is delisted - using replacement data")
+                
+            except Exception as e:
+                ingestion_results['failed_ingests'].append(ticker)
+                ingestion_results['errors'].append(f"{ticker}: Database error - {str(e)}")
+                print(f"❌ Database error for {ticker}: {str(e)}")
+        
+        # Add quality report to results (fix type issue)
+        ingestion_results['data_quality_report'] = [quality_report]
+        
+        # Print summary
+        print(f"\n📊 Ingestion Summary:")
+        print(f"✅ Successful: {len(ingestion_results['successful_ingests'])}")
+        print(f"🔄 Updated: {len(ingestion_results['updated_companies'])}")
+        print(f"⏭️  Skipped: {len(ingestion_results['skipped_companies'])}")
+        print(f"⚠️  Delisted: {len(ingestion_results['delisted_companies'])}")
+        print(f"❌ Failed: {len(ingestion_results['failed_ingests'])}")
+        print(f"📈 Success Rate: {quality_report['success_rate']:.1%}")
+        
+        if ingestion_results['delisted_companies']:
+            print(f"\n⚠️  Delisted companies detected: {', '.join(ingestion_results['delisted_companies'])}")
+        
+        if ingestion_results['errors']:
+            print(f"\n❌ Errors encountered:")
+            for error in ingestion_results['errors'][:5]:  # Show first 5 errors
+                print(f"   • {error}")
+        
+        return ingestion_results
+        
+    finally:
+        db.close()
+
+
+def rank_portfolio_with_auto_ingest(df: pd.DataFrame, auto_ingest: bool = True) -> pd.DataFrame:
+    """
+    Enhanced portfolio ranking with automatic data ingestion for missing tickers.
+    
+    Args:
+        df: DataFrame with columns ['ticker', 'weight']
+        auto_ingest: If True, automatically fetch missing ticker data
+        
+    Returns:
+        DataFrame with complete portfolio ranking and ESG analytics
+    """
+    # Validate input
+    if not {'ticker', 'weight'}.issubset(df.columns):
+        raise ValueError("DataFrame must contain 'ticker' and 'weight' columns")
+    
+    if not np.isclose(df['weight'].sum(), 1.0, atol=1e-6):
+        raise ValueError("Weights must sum to 1.0")
+    
+    # Get current tickers from database
+    db = ESGDB()
+    try:
+        existing_records = db.get_all_records()
+        existing_tickers = {record['ticker'] for record in existing_records}
+        
+        # Find missing tickers
+        portfolio_tickers = set(df['ticker'].str.upper())
+        missing_tickers = portfolio_tickers - existing_tickers
+        
+        # Auto-ingest missing data if requested
+        if auto_ingest and missing_tickers:
+            print(f"🔄 Auto-ingesting data for {len(missing_tickers)} missing tickers...")
+            auto_ingest_portfolio_data(list(missing_tickers))
+        
+        # Now proceed with regular ranking
+        return rank_portfolio(df)
+        
+    finally:
+        db.close()

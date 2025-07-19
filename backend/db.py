@@ -77,7 +77,8 @@ class ESGDB:
         Returns:
             List of all ESG records
         """
-        return self.table.all()
+        # Convert TinyDB Documents to regular dictionaries
+        return [dict(doc) for doc in self.table.all()]
     
     def delete_record(self, ticker: str) -> bool:
         """
