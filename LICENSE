@@ -1,0 +1,35 @@
+MIT License
+
+Copyright (c) 2025 ESG Engine - भारत Edition
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+THIRD-PARTY DATA ATTRIBUTION:
+This software uses data from Yahoo Finance (https://finance.yahoo.com/) through 
+the yfinance Python library. Yahoo Finance data is used for educational and 
+informational purposes only. If Yahoo Finance requires removal of their data 
+usage, please contact the project maintainers and we will promptly comply with 
+any takedown requests or modify the data sources accordingly.
+
+The use of Yahoo Finance data is subject to their Terms of Service:
+https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html
+
+Users of this software should ensure their usage complies with Yahoo Finance's 
+terms and conditions. The project maintainers are not responsible for any 
+violations of third-party terms of service.

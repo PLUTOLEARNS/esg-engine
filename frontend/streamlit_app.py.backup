@@ -1,0 +1,600 @@
+"""
+Streamlit app entry point for ESG Engine frontend.
+"""
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+import requests
+import json
+from datetime import datetime, timedelta
+import os
+from dotenv import load_dotenv
+import io
+import base64
+
+load_dotenv()
+
+# Configuration
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+CACHE_DURATION = timedelta(minutes=30)
+
+# Page configuration
+st.set_page_config(
+    page_title="ESG Engine",
+    page_icon="🌱",        with col2:
+            st.subheader("📊 ESG Rankings")
+            create_esg_ranking_chart(portfolio_data, theme)   layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for better styling
+def load_css():
+    """Load custom CSS styles."""
+    st.markdown("""
+    <style>
+    .metric-card {
+        background-color: var(--background-color);
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border: 1px solid var(--secondary-background-color);
+        margin: 0.5rem 0;
+    }
+    
+    .metric-title {
+        font-size: 0.8rem;
+        color: var(--text-color);
+        margin-bottom: 0.5rem;
+    }
+    
+    .metric-value {
+        font-size: 2rem;
+        font-weight: bold;
+        margin: 0;
+    }
+    
+    .metric-green { color: #28a745; }
+    .metric-yellow { color: #ffc107; }
+    .metric-red { color: #dc3545; }
+    
+    .stDataFrame {
+        border: 1px solid var(--secondary-background-color);
+        border-radius: 0.5rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+def check_backend_health():
+    """Check if backend is available."""
+    try:
+        response = requests.get(f"{BACKEND_URL}/health", timeout=5)
+        return response.status_code == 200
+    except:
+        return False
+
+def upload_and_rank_portfolio(df: pd.DataFrame):
+    """Upload portfolio and get ranking from backend."""
+    try:
+        # Prepare request data
+        request_data = {
+            "tickers": df['ticker'].tolist(),
+            "weights": df['weight'].tolist()
+        }
+        
+        # POST to backend
+        response = requests.post(
+            f"{BACKEND_URL}/rank",
+            json=request_data,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Backend error: {response.status_code} - {response.text}")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"Network error: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Unexpected error: {str(e)}")
+        return None
+
+def get_controversy_data(ticker: str):
+    """Get controversy data for a ticker."""
+    try:
+        response = requests.get(f"{BACKEND_URL}/flags/{ticker}", timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        return {"ticker": ticker, "controversies": []}
+    except:
+        return {"ticker": ticker, "controversies": []}
+
+def create_kpi_cards(summary_data, controversy_count, theme="light"):
+    """Create KPI cards with traffic light colors."""
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        esg_score = summary_data.get("portfolio_weighted_esg", 0)
+        
+        # Traffic light logic for ESG score
+        if esg_score >= 80:
+            color_class = "metric-green"
+            status = "🟢 Excellent"
+        elif esg_score >= 60:
+            color_class = "metric-yellow" 
+            status = "🟡 Good"
+        else:
+            color_class = "metric-red"
+            status = "🔴 Needs Improvement"
+        
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Portfolio ESG Score</div>
+            <div class="metric-value {color_class}">{esg_score:.1f}</div>
+            <div style="font-size: 0.9rem; margin-top: 0.5rem;">{status}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        roic = summary_data.get("portfolio_weighted_roic", 0) * 100
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Weighted ROIC</div>
+            <div class="metric-value">{roic:.1f}%</div>
+            <div style="font-size: 0.9rem; margin-top: 0.5rem;">Return on Invested Capital</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        color_class = "metric-red" if controversy_count > 0 else "metric-green"
+        status = f"🚨 {controversy_count} Issues" if controversy_count > 0 else "✅ Clean"
+        
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Controversy Count</div>
+            <div class="metric-value {color_class}">{controversy_count}</div>
+            <div style="font-size: 0.9rem; margin-top: 0.5rem;">{status}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+def create_radar_chart(portfolio_data, theme="light"):
+    """Create radar chart comparing portfolio vs market benchmark."""
+    if not portfolio_data or len(portfolio_data) == 0:
+        st.warning("No data available for radar chart")
+        return
+    
+    # Calculate portfolio averages (excluding PORTFOLIO_TOTAL row)
+    df = pd.DataFrame(portfolio_data)
+    holdings_df = df[df['ticker'] != 'PORTFOLIO_TOTAL']
+    
+    if holdings_df.empty:
+        st.warning("No holdings data available")
+        return
+    
+    # Calculate weighted averages for portfolio
+    portfolio_env = (holdings_df['environmental'] * holdings_df['weight']).sum()
+    portfolio_social = (holdings_df['social'] * holdings_df['weight']).sum()
+    portfolio_gov = (holdings_df['governance'] * holdings_df['weight']).sum()
+    
+    # Determine market type and benchmark
+    indian_stocks = holdings_df['ticker'].str.contains('.NS').sum()
+    total_stocks = len(holdings_df)
+    is_indian_focused = indian_stocks > total_stocks / 2
+    
+    # Use appropriate benchmark
+    if is_indian_focused:
+        # Indian market benchmarks (approximate NIFTY 50 ESG averages)
+        benchmark_env = 15.0
+        benchmark_social = 12.0 
+        benchmark_gov = 18.0
+        benchmark_name = "NIFTY 50 Average"
+    else:
+        # Global/US market benchmarks
+        benchmark_env = 20.0
+        benchmark_social = 15.0
+        benchmark_gov = 22.0
+        benchmark_name = "S&P 500 Average"
+    
+    # Create radar chart
+    categories = ['Environmental', 'Social', 'Governance']
+    
+    fig = go.Figure()
+    
+    # Portfolio data
+    fig.add_trace(go.Scatterpolar(
+        r=[portfolio_env, portfolio_social, portfolio_gov],
+        theta=categories,
+        fill='toself',
+        name='Your Portfolio',
+        line_color='#1f77b4'
+    ))
+    
+    # Market benchmark
+    fig.add_trace(go.Scatterpolar(
+        r=[benchmark_env, benchmark_social, benchmark_gov],
+        theta=categories,
+        fill='toself',
+        name=benchmark_name,
+        line_color='#ff7f0e',
+        opacity=0.6
+    ))
+    
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 50]  # Adjusted for ESG score ranges
+            )),
+        showlegend=True,
+        title=f"ESG Profile: Portfolio vs {benchmark_name}",
+        template="plotly_white" if theme == "light" else "plotly_dark"
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def create_esg_ranking_chart(portfolio_data, theme="light"):
+    """Create bar chart of ALL holdings ranked by ESG score."""
+    if not portfolio_data:
+        st.warning("No data available for ESG ranking chart")
+        return
+    
+    df = pd.DataFrame(portfolio_data)
+    holdings_df = df[df['ticker'] != 'PORTFOLIO_TOTAL']
+    
+    if holdings_df.empty:
+        st.warning("No holdings data available")
+        return
+    
+    # Sort by ESG score (ascending - worst to best)
+    holdings_df = holdings_df.sort_values('esg_score', ascending=True)
+    
+    # Create color mapping based on ESG score
+    colors = ['#d73027' if score < 20 else '#f46d43' if score < 30 else '#fdae61' if score < 40 else '#74add1' if score < 50 else '#313695' 
+              for score in holdings_df['esg_score']]
+    
+    # Create bar chart
+    fig = px.bar(
+        holdings_df,
+        x='esg_score',
+        y='ticker',
+        orientation='h',
+        title="Holdings Ranked by ESG Score",
+        hover_data={
+            'market_cap': ':,.0f',
+            'weight': ':.1%',
+            'environmental': ':.1f',
+            'social': ':.1f', 
+            'governance': ':.1f'
+        },
+        color='esg_score',
+        color_continuous_scale='RdYlGn'
+    )
+    
+    fig.update_layout(
+        xaxis_title="ESG Score",
+        yaxis_title="Holdings",
+        template="plotly_white" if theme == "light" else "plotly_dark",
+        height=max(400, len(holdings_df) * 40)  # Dynamic height based on number of holdings
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def create_portfolio_datatable(portfolio_data):
+    """Create interactive datatable with sorting and filtering."""
+    if not portfolio_data:
+        st.warning("No data available for datatable")
+        return
+    
+    df = pd.DataFrame(portfolio_data)
+    holdings_df = df[df['ticker'] != 'PORTFOLIO_TOTAL'].copy()
+    
+    if holdings_df.empty:
+        st.warning("No holdings data available")
+        return
+    
+    # Format columns for display
+    holdings_df['weight'] = holdings_df['weight'].apply(lambda x: f"{x:.1%}")
+    holdings_df['esg_score'] = holdings_df['esg_score'].apply(lambda x: f"{x:.1f}")
+    holdings_df['roic'] = holdings_df['roic'].apply(lambda x: f"{x:.1%}")
+    holdings_df['market_cap'] = holdings_df['market_cap'].apply(lambda x: f"${x/1e9:.1f}B")
+    holdings_df['esg_zscore'] = holdings_df['esg_zscore'].apply(lambda x: f"{x:.2f}")
+    holdings_df['roic_zscore'] = holdings_df['roic_zscore'].apply(lambda x: f"{x:.2f}")
+    
+    # Select and rename columns for display
+    display_df = holdings_df[[
+        'ticker', 'weight', 'esg_score', 'environmental', 'social', 'governance',
+        'roic', 'market_cap', 'esg_zscore', 'roic_zscore'
+    ]].copy()
+    
+    display_df.columns = [
+        'Ticker', 'Weight', 'ESG Score', 'Environmental', 'Social', 'Governance',
+        'ROIC', 'Market Cap', 'ESG Z-Score', 'ROIC Z-Score'
+    ]
+    
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+def generate_pdf_report(portfolio_data, summary_data, controversy_count):
+    """Generate PDF report using weasyprint."""
+    try:
+        from weasyprint import HTML, CSS
+        from weasyprint.text.fonts import FontConfiguration
+        
+        # Create HTML content
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>ESG Portfolio Report</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                .header {{ text-align: center; margin-bottom: 30px; }}
+                .kpi-section {{ display: flex; justify-content: space-around; margin: 30px 0; }}
+                .kpi-card {{ text-align: center; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }}
+                .metric-value {{ font-size: 2em; font-weight: bold; }}
+                .metric-green {{ color: #28a745; }}
+                .metric-yellow {{ color: #ffc107; }}
+                .metric-red {{ color: #dc3545; }}
+                table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #f2f2f2; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>ESG Portfolio Report</h1>
+                <p>Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            </div>
+            
+            <div class="kpi-section">
+                <div class="kpi-card">
+                    <h3>Portfolio ESG Score</h3>
+                    <div class="metric-value metric-{'green' if summary_data.get('portfolio_weighted_esg', 0) >= 80 else 'yellow' if summary_data.get('portfolio_weighted_esg', 0) >= 60 else 'red'}">
+                        {summary_data.get('portfolio_weighted_esg', 0):.1f}
+                    </div>
+                </div>
+                
+                <div class="kpi-card">
+                    <h3>Weighted ROIC</h3>
+                    <div class="metric-value">
+                        {summary_data.get('portfolio_weighted_roic', 0)*100:.1f}%
+                    </div>
+                </div>
+                
+                <div class="kpi-card">
+                    <h3>Controversy Count</h3>
+                    <div class="metric-value metric-{'red' if controversy_count > 0 else 'green'}">
+                        {controversy_count}
+                    </div>
+                </div>
+            </div>
+            
+            <h2>Portfolio Holdings</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ticker</th>
+                        <th>Weight</th>
+                        <th>ESG Score</th>
+                        <th>Environmental</th>
+                        <th>Social</th>
+                        <th>Governance</th>
+                        <th>ROIC</th>
+                        <th>Market Cap</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+        
+        # Add portfolio holdings
+        df = pd.DataFrame(portfolio_data)
+        holdings_df = df[df['ticker'] != 'PORTFOLIO_TOTAL']
+        
+        for _, row in holdings_df.iterrows():
+            html_content += f"""
+                    <tr>
+                        <td>{row['ticker']}</td>
+                        <td>{row['weight']:.1%}</td>
+                        <td>{row['esg_score']:.1f}</td>
+                        <td>{row['environmental']:.1f}</td>
+                        <td>{row['social']:.1f}</td>
+                        <td>{row['governance']:.1f}</td>
+                        <td>{row['roic']:.1%}</td>
+                        <td>${row['market_cap']/1e9:.1f}B</td>
+                    </tr>
+            """
+        
+        html_content += """
+                </tbody>
+            </table>
+        </body>
+        </html>
+        """
+        
+        # Generate PDF
+        font_config = FontConfiguration()
+        html_doc = HTML(string=html_content)
+        pdf_bytes = html_doc.write_pdf(font_config=font_config)
+        
+        return pdf_bytes
+        
+    except ImportError:
+        st.error("weasyprint not installed. Please install it to generate PDF reports.")
+        return None
+    except Exception as e:
+        st.error(f"Error generating PDF: {str(e)}")
+        return None
+
+# Main app
+def main():
+    load_css()
+    
+    # Sidebar
+    st.sidebar.title("🌱 ESG Engine")
+    
+    # Theme toggle
+    dark_mode = st.sidebar.toggle("Dark Mode", value=False)
+    theme = "dark" if dark_mode else "light"
+    
+    # Check backend health
+    if not check_backend_health():
+        st.error("⚠️ Backend service is not available. Please ensure the FastAPI server is running.")
+        st.stop()
+    
+    # Initialize session state
+    if 'portfolio_result' not in st.session_state:
+        st.session_state.portfolio_result = None
+    if 'upload_time' not in st.session_state:
+        st.session_state.upload_time = None
+    
+    # Check cache expiration
+    if (st.session_state.upload_time and 
+        datetime.now() - st.session_state.upload_time > CACHE_DURATION):
+        st.session_state.portfolio_result = None
+        st.session_state.upload_time = None
+    
+    # Main title
+    st.title("🌱 ESG Engine - भारत Edition (India)")
+    st.markdown("Upload your portfolio and get instant ESG analysis for Indian markets")
+    
+    # === UPLOAD SECTION ===
+    st.header("📤 Upload Portfolio")
+    
+    # File upload
+    uploaded_file = st.file_uploader(
+        "Choose a CSV file",
+        type="csv",
+        help="CSV must contain 'ticker' and 'weight' columns. Use .NS suffix for Indian stocks (e.g., RELIANCE.NS)"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            # Read CSV
+            df = pd.read_csv(uploaded_file)
+            
+            # Validate columns
+            if not {'ticker', 'weight'}.issubset(df.columns):
+                st.error("❌ CSV must contain 'ticker' and 'weight' columns")
+                st.stop()
+            
+            # Display uploaded data
+            st.subheader("📋 Uploaded Portfolio")
+            st.dataframe(df, use_container_width=True)
+            
+            # Validate weights
+            weight_sum = df['weight'].sum()
+            weight_diff = abs(weight_sum - 1.0)
+            
+            if weight_diff > 0.01:
+                st.error(f"❌ Weights must sum to 1.0 ± 0.01. Current sum: {weight_sum:.3f}")
+                st.stop()
+            else:
+                st.success(f"✅ Weights validated. Sum: {weight_sum:.3f}")
+            
+            # Upload and rank portfolio
+            if st.button("🚀 Analyze Portfolio", type="primary"):
+                with st.spinner("Analyzing portfolio..."):
+                    result = upload_and_rank_portfolio(df)
+                    
+                    if result:
+                        st.session_state.portfolio_result = result
+                        st.session_state.upload_time = datetime.now()
+                        st.success("✅ Portfolio analyzed successfully!")
+                        st.rerun()  # Refresh to show results immediately
+                    else:
+                        st.error("❌ Failed to analyze portfolio")
+                        
+        except Exception as e:
+            st.error(f"❌ Error processing file: {str(e)}")
+    
+    # === RESULTS SECTION ===
+    if st.session_state.portfolio_result:
+        st.header("📊 ESG Analysis Results")
+        
+        result = st.session_state.portfolio_result
+        portfolio_data = result.get('data', [])
+        summary_data = result.get('summary', {})
+        # Get controversy data for all tickers
+        with st.spinner("Loading controversy data..."):
+            df = pd.DataFrame(portfolio_data)
+            holdings_df = df[df['ticker'] != 'PORTFOLIO_TOTAL']
+            total_controversies = 0
+            
+            for ticker in holdings_df['ticker']:
+                controversy_data = get_controversy_data(ticker)
+                total_controversies += len(controversy_data.get('controversies', []))
+        
+        # Cache expiration info
+        if st.session_state.upload_time:
+            cache_expires = st.session_state.upload_time + CACHE_DURATION
+            st.info(f"📅 Data cached until {cache_expires.strftime('%H:%M:%S')}")
+        
+        # KPI Cards
+        st.subheader("📈 Key Performance Indicators")
+        create_kpi_cards(summary_data, total_controversies, theme)
+        
+        # Charts section
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("🎯 ESG Profile Comparison")
+            create_radar_chart(portfolio_data, theme)
+        
+        with col2:
+            st.subheader("� ESG Rankings")
+            create_esg_ranking_chart(portfolio_data, theme)
+        
+        # Data table
+        st.subheader("📋 Portfolio Holdings")
+        create_portfolio_datatable(portfolio_data)
+        
+        # PDF Download
+        st.subheader("📄 Export Report")
+        col1, col2 = st.columns([1, 3])
+        
+        with col1:
+            if st.button("📥 Download PDF", type="secondary"):
+                with st.spinner("Generating PDF..."):
+                    pdf_bytes = generate_pdf_report(portfolio_data, summary_data, total_controversies)
+                    
+                    if pdf_bytes:
+                        st.download_button(
+                            label="💾 Save Report",
+                            data=pdf_bytes,
+                            file_name=f"esg_portfolio_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                            mime="application/pdf"
+                        )
+        
+        with col2:
+            st.info("💡 PDF report includes KPI cards, portfolio holdings, and key metrics.")
+    
+    else:
+        # Show example portfolio for Indian stocks
+        st.header("💡 Example Portfolio")
+        st.markdown("Try uploading this sample Indian portfolio:")
+        
+        sample_data = {
+            'ticker': ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'ITC.NS', 'HINDUNILVR.NS', 'ADANIPORTS.NS'],
+            'weight': [0.25, 0.20, 0.15, 0.15, 0.10, 0.10, 0.05]
+        }
+        sample_df = pd.DataFrame(sample_data)
+        st.dataframe(sample_df, use_container_width=True)
+        
+        # Download sample CSV
+        csv_buffer = io.StringIO()
+        sample_df.to_csv(csv_buffer, index=False)
+        st.download_button(
+            label="📥 Download Sample Portfolio",
+            data=csv_buffer.getvalue(),
+            file_name="sample_indian_portfolio.csv",
+            mime="text/csv"
+        )
+
+if __name__ == "__main__":
+    main()
