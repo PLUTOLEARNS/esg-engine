@@ -146,9 +146,13 @@ def get_delisted_indicator(holding: dict) -> str:
     Returns:
         String with appropriate indicator
     """
-    data_source = holding.get('data_source', '')
+    data_source = holding.get('data_source', '') or ''
     is_delisted = holding.get('is_delisted', False)
-    error_message = holding.get('error_message', '')
+    error_message = holding.get('error_message', '') or ''
+    
+    # Ensure data_source is a string
+    if not isinstance(data_source, str):
+        data_source = str(data_source) if data_source is not None else ''
     
     if is_delisted or 'replacement' in data_source:
         return "🔄 "  # Replacement data indicator
@@ -170,9 +174,13 @@ def get_company_display_name(holding: dict) -> str:
     Returns:
         Formatted company name with status info
     """
-    ticker = holding.get('ticker', '')
-    data_source = holding.get('data_source', '')
+    ticker = holding.get('ticker', '') or ''
+    data_source = holding.get('data_source', '') or ''
     is_delisted = holding.get('is_delisted', False)
+    
+    # Ensure data_source is a string
+    if not isinstance(data_source, str):
+        data_source = str(data_source) if data_source is not None else ''
     
     # Clean ticker for display
     display_ticker = ticker.replace('.NS', '').replace('.BO', '').upper()
@@ -552,9 +560,26 @@ def create_portfolio_datatable(portfolio_data):
         st.warning("No holdings data available")
         return
     
+    # Ensure required columns exist with default values
+    required_columns = ['data_source', 'is_delisted', 'error_message', 'market_cap']
+    for col in required_columns:
+        if col not in holdings_df.columns:
+            if col == 'is_delisted':
+                holdings_df[col] = False
+            elif col == 'market_cap':
+                holdings_df[col] = 0
+            else:
+                holdings_df[col] = ''
+    
     # Add status indicators for delisted/replacement companies
-    holdings_df['status_indicator'] = holdings_df.apply(lambda row: get_delisted_indicator(row.to_dict()), axis=1)
-    holdings_df['company_name'] = holdings_df.apply(lambda row: get_company_display_name(row.to_dict()), axis=1)
+    try:
+        holdings_df['status_indicator'] = holdings_df.apply(lambda row: get_delisted_indicator(row.to_dict()), axis=1)
+        holdings_df['company_name'] = holdings_df.apply(lambda row: get_company_display_name(row.to_dict()), axis=1)
+    except Exception as e:
+        st.error(f"Error processing company indicators: {str(e)}")
+        # Fallback: use ticker as company name
+        holdings_df['status_indicator'] = ''
+        holdings_df['company_name'] = holdings_df['ticker'].str.replace('.NS', '').str.replace('.BO', '').str.upper()
     
     # Format columns for display
     holdings_df['weight'] = holdings_df['weight'].apply(lambda x: f"{x:.1%}")
@@ -562,9 +587,13 @@ def create_portfolio_datatable(portfolio_data):
     holdings_df['roic'] = holdings_df['roic'].apply(lambda x: f"{x:.1%}" if x > 0 else "N/A")
     
     # Format market cap with proper currency
-    holdings_df['market_cap_formatted'] = holdings_df.apply(
-        lambda row: format_market_cap(row.get('market_cap', 0), row.get('ticker', '')), axis=1
-    )
+    try:
+        holdings_df['market_cap_formatted'] = holdings_df.apply(
+            lambda row: format_market_cap(row.get('market_cap', 0), row.get('ticker', '')), axis=1
+        )
+    except Exception as e:
+        st.warning(f"Error formatting market cap: {str(e)}")
+        holdings_df['market_cap_formatted'] = holdings_df['market_cap'].apply(lambda x: f"${x/1e9:.1f}B" if x > 0 else "N/A")
     
     holdings_df['environmental'] = holdings_df['environmental'].apply(lambda x: f"{x:.1f}" if x > 0 else "N/A")
     holdings_df['social'] = holdings_df['social'].apply(lambda x: f"{x:.1f}" if x > 0 else "N/A")
