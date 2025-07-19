@@ -447,6 +447,16 @@ def generate_risk_assessment(portfolio_data, controversy_count, portfolio_esg, p
 def generate_metric_explanation(metric_name: str, value: float, portfolio_data) -> str:
     """Generate AI explanation for specific metrics."""
     
+    # Handle different portfolio_data formats
+    if isinstance(portfolio_data, list) and len(portfolio_data) >= 2 and isinstance(portfolio_data[0], (int, float)):
+        # Format: [esg_score, roic_value]
+        portfolio_esg = portfolio_data[0]
+        portfolio_roic = portfolio_data[1]
+    else:
+        # Default fallback values
+        portfolio_esg = value if metric_name == 'esg_score' else 50.0
+        portfolio_roic = value if metric_name == 'roic' else 0.12
+    
     context_prompts = {
         'esg_score': f"""
         Explain why this Indian portfolio has an ESG score of {value:.1f}/100. 
@@ -459,8 +469,8 @@ def generate_metric_explanation(metric_name: str, value: float, portfolio_data) 
         and assess sustainability of these returns.
         """,
         'risk_profile': f"""
-        Assess the overall risk profile of this Indian equity portfolio based on ESG score {portfolio_data[0]:.1f}, 
-        ROIC {portfolio_data[1]*100:.1f}%, and market composition.
+        Assess the overall risk profile of this Indian equity portfolio based on ESG score {portfolio_esg:.1f}/100, 
+        ROIC {portfolio_roic*100:.1f}%, and market composition.
         Focus on concentration risk, sector exposure, and ESG-related risks.
         """
     }
