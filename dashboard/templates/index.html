@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESG Portfolio Analytics Dashboard - भारत Edition</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Chart.js for visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    
+    <script>
+        // Configure Tailwind with our custom color scheme
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary-black': '#000000',
+                        'light-green': '#90EE90',
+                        'gold': '#FFD700',
+                        'dark-gray': '#333333',
+                        'light-gray': '#f5f5f5'
+                    },
+                    fontFamily: {
+                        'primary': ['Roboto', 'sans-serif'],
+                        'secondary': ['Montserrat', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="font-primary transition-colors duration-300" id="main-body">
+    
+    <!-- Header -->
+    <header class="transition-colors duration-300 shadow-lg border-b-2 border-gold" id="header">
+        <div class="container mx-auto px-6 py-4">
+            <div class="flex justify-between items-center">
+                <!-- Logo and Title -->
+                <div class="flex items-center space-x-4">
+                    <div class="text-gold text-3xl">
+                        <i class="fas fa-leaf"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-secondary font-bold text-2xl">ESG Portfolio Analytics</h1>
+                        <p class="font-primary text-sm opacity-80">भारत Edition - Advanced Market Intelligence</p>
+                    </div>
+                </div>
+                
+                <!-- Theme Toggle -->
+                <div class="flex items-center space-x-4">
+                    <button 
+                        id="theme-toggle" 
+                        class="bg-gold text-primary-black px-4 py-2 rounded-lg font-medium hover:scale-105 transition-transform duration-200 flex items-center space-x-2"
+                    >
+                        <i class="fas fa-adjust"></i>
+                        <span id="theme-text">Light Theme</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-6 py-8">
+        
+        <!-- Search Section -->
+        <section class="mb-12">
+            <div class="text-center mb-8">
+                <h2 class="font-secondary font-bold text-3xl mb-4">Smart Stock Search & Analysis</h2>
+                <p class="font-primary text-lg opacity-80">Search by company name, ticker, or sector. Get AI-powered insights, predictions, and risk analysis.</p>
+            </div>
+            
+            <!-- Search Bar -->
+            <div class="max-w-4xl mx-auto">
+                <div class="relative">
+                    <input 
+                        type="text" 
+                        id="search-input" 
+                        placeholder="Search for stocks... (e.g., 'Tata', 'RELIANCE', 'banking')"
+                        class="w-full px-6 py-4 text-lg rounded-xl border-2 border-gold focus:outline-none focus:ring-4 focus:ring-gold focus:ring-opacity-30 transition-all duration-300"
+                    >
+                    <button 
+                        id="search-btn" 
+                        class="absolute right-3 top-1/2 transform -translate-y-1/2 bg-gold text-primary-black px-6 py-2 rounded-lg font-medium hover:scale-105 transition-transform duration-200"
+                    >
+                        <i class="fas fa-search"></i> Search
+                    </button>
+                </div>
+                
+                <!-- Search Suggestions -->
+                <div id="search-suggestions" class="hidden mt-2 rounded-lg border border-gold max-h-60 overflow-y-auto">
+                    <!-- Dynamic suggestions will be populated here -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Results Section -->
+        <section id="results-section" class="hidden">
+            
+            <!-- Search Results -->
+            <div id="search-results" class="mb-12">
+                <h3 class="font-secondary font-bold text-2xl mb-6">Search Results</h3>
+                <div id="results-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Dynamic search results will be populated here -->
+                </div>
+            </div>
+            
+            <!-- Detailed Analysis -->
+            <div id="detailed-analysis" class="hidden">
+                <h3 class="font-secondary font-bold text-2xl mb-6">Detailed Stock Analysis</h3>
+                
+                <!-- Analysis Cards Grid -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                    
+                    <!-- ESG Overview Card -->
+                    <div class="rounded-xl border-2 border-gold p-6 shadow-lg transition-colors duration-300" id="esg-card">
+                        <h4 class="font-secondary font-bold text-xl mb-4 text-gold">
+                            <i class="fas fa-leaf mr-2"></i>ESG Analysis
+                        </h4>
+                        <div id="esg-content">
+                            <!-- ESG content will be populated here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Price Prediction Card -->
+                    <div class="rounded-xl border-2 border-gold p-6 shadow-lg transition-colors duration-300" id="prediction-card">
+                        <h4 class="font-secondary font-bold text-xl mb-4 text-gold">
+                            <i class="fas fa-chart-line mr-2"></i>Price Prediction
+                        </h4>
+                        <div id="prediction-content">
+                            <!-- Prediction content will be populated here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Risk Assessment Card -->
+                    <div class="rounded-xl border-2 border-gold p-6 shadow-lg transition-colors duration-300" id="risk-card">
+                        <h4 class="font-secondary font-bold text-xl mb-4 text-gold">
+                            <i class="fas fa-shield-alt mr-2"></i>Manipulation Risk
+                        </h4>
+                        <div id="risk-content">
+                            <!-- Risk content will be populated here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Alternatives Card -->
+                    <div class="rounded-xl border-2 border-gold p-6 shadow-lg transition-colors duration-300" id="alternatives-card">
+                        <h4 class="font-secondary font-bold text-xl mb-4 text-gold">
+                            <i class="fas fa-exchange-alt mr-2"></i>Alternative Stocks
+                        </h4>
+                        <div id="alternatives-content">
+                            <!-- Alternatives content will be populated here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Charts Section -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="rounded-xl border-2 border-gold p-6 shadow-lg transition-colors duration-300">
+                        <h4 class="font-secondary font-bold text-xl mb-4 text-gold">ESG Breakdown</h4>
+                        <canvas id="esg-chart" width="400" height="200"></canvas>
+                    </div>
+                    
+                    <div class="rounded-xl border-2 border-gold p-6 shadow-lg transition-colors duration-300">
+                        <h4 class="font-secondary font-bold text-xl mb-4 text-gold">Risk Profile</h4>
+                        <canvas id="risk-chart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Loading Indicator -->
+        <div id="loading" class="hidden text-center py-12">
+            <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gold"></div>
+            <p class="font-primary text-lg mt-4">Analyzing market data...</p>
+        </div>
+        
+        <!-- Error Message -->
+        <div id="error-message" class="hidden text-center py-12">
+            <div class="text-red-500 text-6xl mb-4">
+                <i class="fas fa-exclamation-triangle"></i>
+            </div>
+            <h3 class="font-secondary font-bold text-2xl mb-4">Analysis Error</h3>
+            <p class="font-primary text-lg" id="error-text"></p>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="transition-colors duration-300 border-t-2 border-gold py-8 mt-16" id="footer">
+        <div class="container mx-auto px-6 text-center">
+            <div class="mb-6">
+                <h3 class="font-secondary font-bold text-xl mb-2">ESG Portfolio Analytics Dashboard</h3>
+                <p class="font-primary opacity-80">Advanced market intelligence for Indian financial markets</p>
+            </div>
+            
+            <div class="border-t border-gold pt-6">
+                <p class="font-primary text-sm opacity-60">
+                    <strong>Disclaimer:</strong> Stock predictions are for educational purposes only and should not be considered as financial advice. 
+                    This tool uses simplified machine learning models. Always conduct thorough research and consult with financial advisors before making investment decisions.
+                </p>
+                <p class="font-primary text-sm opacity-60 mt-2">
+                    Data sources: Yahoo Finance, News API, Alpha Vantage • Built with ❤️ for the Indian markets
+                </p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- JavaScript -->
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

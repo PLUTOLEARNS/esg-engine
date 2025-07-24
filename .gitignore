@@ -77,3 +77,11 @@ docker-compose.override.yml
 # VS Code
 .vscode/settings.json
 .vscode/launch.json
+
+# Local setup files (not for production)
+dashboard/start.bat
+dashboard/start.sh
+dashboard/SETUP.md
+dashboard/SUCCESS.md
+dashboard/DEPLOYMENT.md
+dashboard/.env.example
