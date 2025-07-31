@@ -1612,5 +1612,189 @@ def main():
             mime="text/csv"
         )
 
+def check_enhanced_features():
+    """Check if enhanced features are available"""
+    try:
+        response = requests.get(f"{BACKEND_URL}/api/enhanced/health", timeout=5)
+        return response.json().get('enhanced_analytics_available', False)
+    except:
+        return False
+
+def enhanced_stock_search():
+    """Enhanced stock search component"""
+    st.subheader("🔍 Enhanced Stock Search")
+    
+    query = st.text_input("Search for stocks (try 'Tata', 'RELIANCE', 'banking')")
+    
+    if query:
+        try:
+            response = requests.get(f"{BACKEND_URL}/api/enhanced/search", params={'query': query})
+            if response.status_code == 200:
+                stocks = response.json()
+                
+                if stocks:
+                    st.write(f"Found {len(stocks)} matches:")
+                    
+                    # Display as cards
+                    cols = st.columns(min(3, len(stocks)))
+                    for idx, stock in enumerate(stocks[:6]):  # Show max 6 results
+                        with cols[idx % 3]:
+                            with st.container():
+                                st.write(f"**{stock['symbol']}**")
+                                st.write(f"{stock['name']}")
+                                st.write(f"Sector: {stock.get('sector', 'Unknown')}")
+                                
+                                if st.button(f"Analyze {stock['symbol']}", key=f"analyze_{stock['symbol']}"):
+                                    st.session_state.selected_stock = stock['symbol']
+                                    st.rerun()
+                else:
+                    st.info("No stocks found. Try a different search term.")
+            else:
+                st.error("Search failed. Make sure the enhanced backend is running.")
+        except Exception as e:
+            st.error(f"Search error: {str(e)}")
+
+def enhanced_stock_analysis(symbol):
+    """Enhanced stock analysis with ML predictions"""
+    st.subheader(f"📊 Enhanced Analysis: {symbol}")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("### 🤖 ML Price Prediction")
+        try:
+            response = requests.post(f"{BACKEND_URL}/api/enhanced/predict", json={'symbol': symbol})
+            if response.status_code == 200:
+                prediction = response.json()
+                
+                # Display prediction metrics
+                current_price = prediction['current_price']
+                predicted_price = prediction['predicted_price']
+                confidence = prediction['confidence']
+                
+                # Price change calculation
+                price_change = predicted_price - current_price
+                price_change_pct = (price_change / current_price) * 100
+                
+                # Metrics
+                col_a, col_b, col_c = st.columns(3)
+                with col_a:
+                    st.metric("Current Price", f"₹{current_price:.2f}")
+                with col_b:
+                    st.metric("Predicted Price", f"₹{predicted_price:.2f}", 
+                             delta=f"{price_change_pct:+.1f}%")
+                with col_c:
+                    st.metric("Confidence", f"{confidence:.1%}")
+                
+                # Technical indicators
+                if 'technical_indicators' in prediction:
+                    with st.expander("Technical Indicators"):
+                        indicators = prediction['technical_indicators']
+                        for key, value in indicators.items():
+                            st.write(f"**{key}**: {value}")
+                
+            else:
+                st.error("Prediction failed")
+        except Exception as e:
+            st.error(f"Prediction error: {str(e)}")
+    
+    with col2:
+        st.write("### 🚨 Manipulation Detection")
+        try:
+            response = requests.get(f"{BACKEND_URL}/api/enhanced/manipulation", params={'symbol': symbol})
+            if response.status_code == 200:
+                manipulation = response.json()
+                
+                risk_score = manipulation['risk_score']
+                risk_level = manipulation['risk_level']
+                alerts = manipulation['alerts']
+                news_sentiment = manipulation.get('news_sentiment', 0)
+                
+                # Risk score gauge
+                fig = go.Figure(go.Indicator(
+                    mode = "gauge+number+delta",
+                    value = risk_score * 100,
+                    domain = {'x': [0, 1], 'y': [0, 1]},
+                    title = {'text': "Risk Score"},
+                    delta = {'reference': 50},
+                    gauge = {
+                        'axis': {'range': [None, 100]},
+                        'bar': {'color': "darkred" if risk_score > 0.7 else "orange" if risk_score > 0.4 else "green"},
+                        'steps': [
+                            {'range': [0, 40], 'color': "lightgreen"},
+                            {'range': [40, 70], 'color': "yellow"},
+                            {'range': [70, 100], 'color': "red"}
+                        ],
+                        'threshold': {
+                            'line': {'color': "red", 'width': 4},
+                            'thickness': 0.75,
+                            'value': 90
+                        }
+                    }
+                ))
+                fig.update_layout(height=250)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Risk level display
+                if risk_level == "HIGH":
+                    st.error(f"⚠️ **HIGH RISK** - Score: {risk_score:.2f}")
+                elif risk_level == "MEDIUM":
+                    st.warning(f"⚠️ **MEDIUM RISK** - Score: {risk_score:.2f}")
+                else:
+                    st.success(f"✅ **LOW RISK** - Score: {risk_score:.2f}")
+                
+                # Alerts
+                if alerts:
+                    st.write("**Alerts:**")
+                    for alert in alerts:
+                        st.write(f"• {alert}")
+                
+                # News sentiment
+                sentiment_color = "green" if news_sentiment > 0 else "red" if news_sentiment < 0 else "gray"
+                st.write(f"**News Sentiment**: <span style='color:{sentiment_color}'>{news_sentiment:+.2f}</span>", unsafe_allow_html=True)
+                
+            else:
+                st.error("Manipulation detection failed")
+        except Exception as e:
+            st.error(f"Manipulation detection error: {str(e)}")
+
+def add_enhanced_features():
+    """Add enhanced features to the main app"""
+    
+    # Check if enhanced features are available
+    enhanced_available = check_enhanced_features()
+    
+    if enhanced_available:
+        with st.sidebar:
+            st.markdown("---")
+            st.markdown("### 🌟 Enhanced Features")
+            enable_enhanced = st.checkbox("Enable Enhanced Analytics", value=True)
+        
+        if enable_enhanced:
+            st.success("🚀 Enhanced Analytics Available!")
+            
+            # Add enhanced search
+            enhanced_stock_search()
+            
+            # If a stock is selected, show enhanced analysis
+            if 'selected_stock' in st.session_state:
+                enhanced_stock_analysis(st.session_state.selected_stock)
+    
+    else:
+        with st.sidebar:
+            st.warning("⚠️ Enhanced features unavailable")
+            if st.button("ℹ️ Setup Instructions"):
+                st.info("""
+                To enable enhanced features:
+                1. Install: pip install scikit-learn newsapi-python alpha-vantage requests-cache
+                2. Get API keys from NewsAPI.org and AlphaVantage.co
+                3. Add to .env: NEWS_API_KEY and ALPHA_VANTAGE_API_KEY
+                4. Restart the backend
+                """)
+
 if __name__ == "__main__":
     main()
+    
+    # Add enhanced features at the end
+    st.markdown("---")
+    add_enhanced_features()

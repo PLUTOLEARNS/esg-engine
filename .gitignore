@@ -29,6 +29,19 @@ env/
 
 # Environment Variables
 .env
+
+# Local setup and documentation files (not for production)
+start.bat
+start.sh
+SETUP.md
+SUCCESS.md
+DEPLOYMENT.md
+test_demo.py
+
+# Cache files
+requests_cache.sqlite
+esg_dashboard_cache.sqlite
+.env
 .env.local
 .env.example
 

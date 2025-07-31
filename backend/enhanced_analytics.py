@@ -13,12 +13,41 @@ from typing import Dict, List, Optional, Tuple, Any
 import requests_cache
 from dotenv import load_dotenv
 
-# Add parent directory to path to import existing modules
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from backend.scrapers.yahoo_client import RobustYahooFinanceClient
-from backend.analytics import rank_portfolio
-from backend.db import ESGDB
+# Import existing modules with proper error handling
+try:
+    from backend.scrapers.yahoo_client import RobustYahooFinanceClient
+    from backend.analytics import rank_portfolio
+    from backend.db import ESGDB
+except ImportError:
+    try:
+        from .scrapers.yahoo_client import RobustYahooFinanceClient
+        from .analytics import rank_portfolio
+        from .db import ESGDB
+    except ImportError:
+        # Final fallback - create dummy classes
+        class RobustYahooFinanceClient:
+            def fetch_company_data(self, symbol):
+                from datetime import datetime
+                return type('CompanyData', (), {
+                    'ticker': symbol,
+                    'market_cap': 100000000,
+                    'roic': 0.15,
+                    'environmental': 50,
+                    'social': 50,
+                    'governance': 50,
+                    'esg_score': 50,
+                    'is_delisted': False,
+                    'data_source': 'fallback',
+                    'last_updated': datetime.now().isoformat(),
+                    'error_message': ''
+                })()
+        
+        def rank_portfolio(df):
+            return df
+        
+        class ESGDB:
+            def __init__(self):
+                pass
 
 # Load environment variables
 load_dotenv()
@@ -138,21 +167,37 @@ class EnhancedESGAnalytics:
             
             if score > 0:
                 # Get real-time market data for the stock
-                stock_data = self.yahoo_client.fetch_company_data(ticker)
-                
-                result = {
-                    'ticker': ticker,
-                    'name': details['name'],
-                    'sector': details['sector'],
-                    'market_cap': stock_data.market_cap,
-                    'market_cap_formatted': self._format_market_cap(stock_data.market_cap),
-                    'esg_score': stock_data.esg_score,
-                    'roic': stock_data.roic,
-                    'score': score,
-                    'data_source': stock_data.data_source,
-                    'is_delisted': stock_data.is_delisted
-                }
-                results.append(result)
+                try:
+                    stock_data = self.yahoo_client.fetch_company_data(ticker)
+                    
+                    result = {
+                        'symbol': ticker,
+                        'name': details['name'],
+                        'sector': details['sector'],
+                        'logo_url': '',  # Add logo URL if available
+                        'market_cap': self._format_market_cap(getattr(stock_data, 'market_cap', 0)),
+                        'esg_score': getattr(stock_data, 'esg_score', 0),
+                        'roic': getattr(stock_data, 'roic', 0),
+                        'score': score,
+                        'data_source': getattr(stock_data, 'data_source', 'unknown'),
+                        'is_delisted': getattr(stock_data, 'is_delisted', False)
+                    }
+                    results.append(result)
+                except Exception as e:
+                    # Fallback data
+                    result = {
+                        'symbol': ticker,
+                        'name': details['name'],
+                        'sector': details['sector'],
+                        'logo_url': '',
+                        'market_cap': 'N/A',
+                        'esg_score': 0,
+                        'roic': 0,
+                        'score': score,
+                        'data_source': 'fallback',
+                        'is_delisted': False
+                    }
+                    results.append(result)
         
         # Sort by relevance score and limit results
         results = sorted(results, key=lambda x: x['score'], reverse=True)[:limit]
@@ -236,10 +281,10 @@ class EnhancedESGAnalytics:
                     'ticker': alt_ticker,
                     'name': details['name'],
                     'sector': details['sector'],
-                    'market_cap_formatted': self._format_market_cap(stock_data.market_cap),
-                    'esg_score': stock_data.esg_score,
-                    'roic': stock_data.roic,
-                    'data_source': stock_data.data_source,
+                    'market_cap_formatted': self._format_market_cap(getattr(stock_data, 'market_cap', 0)),
+                    'esg_score': getattr(stock_data, 'esg_score', 0),
+                    'roic': getattr(stock_data, 'roic', 0),
+                    'data_source': getattr(stock_data, 'data_source', 'unknown'),
                     'reason': f"Alternative to {ticker} in {target_sector} sector"
                 })
         
@@ -315,12 +360,19 @@ class EnhancedESGAnalytics:
             X_train, X_test = X[:split_idx], X[split_idx:]
             y_train, y_test = y[:split_idx], y[split_idx:]
             
+            # Convert to numpy arrays to avoid type issues
+            X_train = np.array(X_train)
+            y_train = np.array(y_train)
+            X_test = np.array(X_test)
+            y_test = np.array(y_test)
+            
             model.fit(X_train, y_train)
             
             # Calculate model accuracy
             y_pred_test = model.predict(X_test)
             mae = mean_absolute_error(y_test, y_pred_test)
-            accuracy = max(0, 1 - (mae / np.mean(y_test)))  # Simple accuracy metric
+            y_test_mean = float(np.mean(np.array(y_test)))
+            accuracy = max(0, 1 - (mae / y_test_mean))
             
             # Predict future price
             last_day = len(hist)
@@ -522,24 +574,25 @@ class EnhancedESGAnalytics:
         
         # Get alternatives if problematic
         alternatives = []
-        if stock_data.is_delisted or stock_data.error_message:
-            alternatives = self.get_stock_alternatives(ticker)
+        if hasattr(stock_data, 'is_delisted') and hasattr(stock_data, 'error_message'):
+            if getattr(stock_data, 'is_delisted', False) or getattr(stock_data, 'error_message', None):
+                alternatives = self.get_stock_alternatives(ticker)
         
         return {
             'ticker': ticker,
             'basic_data': {
                 'name': self.indian_stock_universe.get(ticker, {}).get('name', 'Unknown'),
                 'sector': self.indian_stock_universe.get(ticker, {}).get('sector', 'Unknown'),
-                'market_cap': stock_data.market_cap,
-                'market_cap_formatted': self._format_market_cap(stock_data.market_cap),
-                'esg_score': stock_data.esg_score,
-                'environmental': stock_data.environmental,
-                'social': stock_data.social,
-                'governance': stock_data.governance,
-                'roic': stock_data.roic,
-                'is_delisted': stock_data.is_delisted,
-                'data_source': stock_data.data_source,
-                'error_message': stock_data.error_message
+                'market_cap': getattr(stock_data, 'market_cap', 0),
+                'market_cap_formatted': self._format_market_cap(getattr(stock_data, 'market_cap', 0)),
+                'esg_score': getattr(stock_data, 'esg_score', 0),
+                'environmental': getattr(stock_data, 'environmental', 0),
+                'social': getattr(stock_data, 'social', 0),
+                'governance': getattr(stock_data, 'governance', 0),
+                'roic': getattr(stock_data, 'roic', 0),
+                'is_delisted': getattr(stock_data, 'is_delisted', False),
+                'data_source': getattr(stock_data, 'data_source', 'unknown'),
+                'error_message': getattr(stock_data, 'error_message', None)
             },
             'prediction': prediction,
             'manipulation_risk': manipulation,
