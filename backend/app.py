@@ -14,10 +14,10 @@ import json
 
 # Import enhanced analytics with fallback
 try:
-    from backend.enhanced_analytics import EnhancedESGAnalytics
+    from backend.analytics import EnhancedESGAnalytics
 except ImportError:
     try:
-        from enhanced_analytics import EnhancedESGAnalytics
+        from analytics import EnhancedESGAnalytics
     except ImportError:
         EnhancedESGAnalytics = None
         print("⚠️ Enhanced analytics not available - running in basic mode")
