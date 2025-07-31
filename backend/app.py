@@ -353,7 +353,7 @@ async def search_stocks_enhanced(query: str):
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
-@app.post("/api/enhanced/predict", response_model=PredictionResponse)
+@app.get("/api/enhanced/predict/{symbol}", response_model=PredictionResponse)
 async def predict_stock_price(symbol: str):
     """ML-powered stock price prediction"""
     if not EnhancedESGAnalytics:
@@ -365,18 +365,18 @@ async def predict_stock_price(symbol: str):
         
         return PredictionResponse(
             symbol=symbol,
-            current_price=prediction['current_price'],
-            predicted_price=prediction['predicted_price'],
-            confidence=prediction['confidence'],
-            prediction_date=prediction['prediction_date'],
-            technical_indicators=prediction['technical_indicators']
+            current_price=prediction.get('current_price', 0),
+            predicted_price=prediction.get('predicted_price', 0),
+            confidence=prediction.get('confidence', 0),
+            prediction_date=datetime.now().isoformat(),  # Use current date since prediction doesn't return this
+            technical_indicators=prediction  # Return the full prediction as technical indicators
         )
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
 
-@app.get("/api/enhanced/manipulation", response_model=ManipulationResponse)
+@app.get("/api/enhanced/manipulation/{symbol}", response_model=ManipulationResponse)
 async def detect_manipulation(symbol: str):
     """Market manipulation detection"""
     if not EnhancedESGAnalytics:
@@ -388,10 +388,10 @@ async def detect_manipulation(symbol: str):
         
         return ManipulationResponse(
             symbol=symbol,
-            risk_score=analysis['risk_score'],
-            risk_level=analysis['risk_level'],
-            alerts=analysis['alerts'],
-            news_sentiment=analysis['news_sentiment']
+            risk_score=analysis.get('risk_score', 0),
+            risk_level=analysis.get('risk_level', 'Unknown'),
+            alerts=analysis.get('alerts', []),
+            news_sentiment=0.0  # Default value since this field doesn't exist in our analysis
         )
     
     except Exception as e:
