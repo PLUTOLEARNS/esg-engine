@@ -101,3 +101,83 @@ class ESGDB:
     def close(self) -> None:
         """Close the database connection."""
         self.db.close()
+
+
+# Standalone wrapper functions for functional imports
+def get_all_esg_records(db_path: str = "data/esg.json") -> List[Dict]:
+    """Get all ESG records from database."""
+    db = ESGDB(db_path)
+    try:
+        return db.get_all_records()
+    finally:
+        db.close()
+
+
+def upsert_esg_record(record: Dict, db_path: str = "data/esg.json") -> None:
+    """Upsert an ESG record to database."""
+    db = ESGDB(db_path)
+    try:
+        db.upsert_esg_record(record)
+    finally:
+        db.close()
+
+
+def get_esg_record(ticker: str, db_path: str = "data/esg.json") -> Optional[Dict]:
+    """Get a single ESG record by ticker."""
+    db = ESGDB(db_path)
+    try:
+        return db.get_esg_record(ticker)
+    finally:
+        db.close()
+
+
+def delete_esg_record(ticker: str, db_path: str = "data/esg.json") -> bool:
+    """Delete an ESG record by ticker."""
+    db = ESGDB(db_path)
+    try:
+        return db.delete_record(ticker)
+    finally:
+        db.close()
+
+
+# Utility functions
+def get_database_path() -> str:
+    """Get the default database path."""
+    return "data/esg.json"
+
+
+def create_sample_data() -> None:
+    """Create sample ESG data for testing."""
+    sample_records = [
+        {
+            'ticker': 'RELIANCE.NS',
+            'environmental': 75,
+            'social': 80,
+            'governance': 85,
+            'esg_score': 80,
+            'roic': 0.12,
+            'market_cap': 15000000000000,
+            'last_updated': datetime.now().isoformat(),
+            'data_source': 'sample',
+            'is_delisted': False,
+            'error_message': '',
+            'currency': 'INR'
+        },
+        {
+            'ticker': 'TCS.NS',
+            'environmental': 85,
+            'social': 90,
+            'governance': 95,
+            'esg_score': 90,
+            'roic': 0.25,
+            'market_cap': 12000000000000,
+            'last_updated': datetime.now().isoformat(),
+            'data_source': 'sample',
+            'is_delisted': False,
+            'error_message': '',
+            'currency': 'INR'
+        }
+    ]
+    
+    for record in sample_records:
+        upsert_esg_record(record)

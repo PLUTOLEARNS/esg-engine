@@ -18,57 +18,74 @@ from aiohttp import ClientTimeout
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 
-# Import existing modules with proper error handling
+# Import only necessary functions and modules
 try:
-    from backend.scrapers.yahoo_client import RobustYahooFinanceClient, validate_and_fetch_portfolio
-    from backend.db import ESGDB
+    from backend.scrapers.yahoo_client import validate_and_fetch_portfolio, fetch_esg_data_with_fallbacks
+    from backend.db import get_all_esg_records, upsert_esg_record
     from backend.esg_validator import esg_validator
     
-    # Successfully imported real classes
+    # Successfully imported real functions
     _IMPORTS_SUCCESSFUL = True
     
 except ImportError:
     try:
-        from .scrapers.yahoo_client import RobustYahooFinanceClient, validate_and_fetch_portfolio
-        from .db import ESGDB
+        from .scrapers.yahoo_client import validate_and_fetch_portfolio, fetch_esg_data_with_fallbacks
+        from .db import get_all_esg_records, upsert_esg_record
         from .esg_validator import esg_validator
         
-        # Successfully imported real classes
+        # Successfully imported real functions
         _IMPORTS_SUCCESSFUL = True
         
     except ImportError:
-        # Create fallback classes only if imports fail
+        # Create fallback functions only if imports fail
         _IMPORTS_SUCCESSFUL = False
         
-        class RobustYahooFinanceClient:
-            def fetch_company_data(self, symbol):
-                from datetime import datetime
-                return type('CompanyData', (), {
-                    'ticker': symbol,
-                    'market_cap': 100000000,
-                    'roic': 0.15,
-                    'environmental': 50,
-                    'social': 50,
-                    'governance': 50,
-                    'esg_score': 50,
-                    'is_delisted': False,
-                    'data_source': 'fallback',
-                    'last_updated': datetime.now().isoformat(),
-                    'error_message': ''
-                })()
+        def fetch_esg_data_with_fallbacks(ticker: str) -> Dict[str, Any]:
+            """Fallback function for fetching ESG data."""
+            return {
+                "ticker": ticker,
+                "environmental": 50,
+                "social": 50, 
+                "governance": 50,
+                "esg_score": 50,
+                "roic": 0.15,
+                "market_cap": 100000000,
+                "last_updated": datetime.now().isoformat(),
+                "data_source": "fallback",
+                "is_delisted": False,
+                "error_message": ""
+            }
         
         def validate_and_fetch_portfolio(tickers):
-            return {}, {'success_rate': 0.0}
+            """Fallback function for portfolio validation."""
+            results = {}
+            for ticker in tickers:
+                results[ticker] = type('CompanyData', (), fetch_esg_data_with_fallbacks(ticker))()
+            return results, {'success_rate': 0.0}
         
-        class ESGDB:
-            def __init__(self):
-                pass
-            def get_all_records(self):
-                return []
-            def close(self):
-                pass
-            def upsert_esg_record(self, record):
-                pass
+        def get_all_esg_records(db_path: str = "data/esg.json"):
+            """Fallback function for getting all records."""
+            return []
+            
+        def upsert_esg_record(record, db_path: str = "data/esg.json"):
+            """Fallback function for upserting records."""
+            pass
+            
+        def get_esg_record(ticker: str, db_path: str = "data/esg.json"):
+            """Fallback function for getting a record."""
+            return None
+            
+        def delete_esg_record(ticker: str, db_path: str = "data/esg.json"):
+            """Fallback function for deleting a record."""
+            return False
+            
+        def get_database_path():
+            """Fallback function for database path."""
+            return "data/esg.json"
+            
+        def create_sample_data():
+            """Fallback function for creating sample data."""
+            pass
         
         # Dummy validator
         class DummyValidator:
@@ -112,74 +129,69 @@ def rank_portfolio(df: pd.DataFrame) -> pd.DataFrame:
     if not np.isclose(df['weight'].sum(), 1.0, atol=1e-6):
         raise ValueError("Weights must sum to 1.0")
     
-    # Get ESG data from database
-    db = ESGDB()
-    try:
-        all_records = db.get_all_records()
-        esg_df = pd.DataFrame(all_records)
+    # Get ESG data from database using functional approach
+    all_records = get_all_esg_records()
+    esg_df = pd.DataFrame(all_records)
+    
+    if esg_df.empty:
+        raise ValueError("No ESG data found in database. Run data ingestion first.")
+    
+    # Left join with portfolio
+    result_df = df.merge(esg_df, on='ticker', how='left')
+    
+    # Check for missing data
+    missing_tickers = result_df[result_df['esg_score'].isna()]['ticker'].tolist()
+    if missing_tickers:
+        print(f"Warning: Missing ESG data for tickers: {missing_tickers}")
+    
+    # Fill missing values with 0 for calculations
+    numeric_cols = ['environmental', 'social', 'governance', 'esg_score', 'roic', 'market_cap']
+    result_df[numeric_cols] = result_df[numeric_cols].fillna(0)
+    
+    # Calculate weighted metrics
+    result_df['weighted_esg'] = result_df['weight'] * result_df['esg_score']
+    result_df['weighted_roic'] = result_df['weight'] * result_df['roic']
+    
+    # Calculate z-scores vs S&P 500 universe (all records in DB)
+    esg_mean = esg_df['esg_score'].mean()
+    esg_std = esg_df['esg_score'].std()
+    roic_mean = esg_df['roic'].mean()
+    roic_std = esg_df['roic'].std()
+    
+    # Avoid division by zero
+    if esg_std > 0:
+        result_df['esg_zscore'] = (result_df['esg_score'] - esg_mean) / esg_std
+    else:
+        result_df['esg_zscore'] = 0
         
-        if esg_df.empty:
-            raise ValueError("No ESG data found in database. Run data ingestion first.")
-        
-        # Left join with portfolio
-        result_df = df.merge(esg_df, on='ticker', how='left')
-        
-        # Check for missing data
-        missing_tickers = result_df[result_df['esg_score'].isna()]['ticker'].tolist()
-        if missing_tickers:
-            print(f"Warning: Missing ESG data for tickers: {missing_tickers}")
-        
-        # Fill missing values with 0 for calculations
-        numeric_cols = ['environmental', 'social', 'governance', 'esg_score', 'roic', 'market_cap']
-        result_df[numeric_cols] = result_df[numeric_cols].fillna(0)
-        
-        # Calculate weighted metrics
-        result_df['weighted_esg'] = result_df['weight'] * result_df['esg_score']
-        result_df['weighted_roic'] = result_df['weight'] * result_df['roic']
-        
-        # Calculate z-scores vs S&P 500 universe (all records in DB)
-        esg_mean = esg_df['esg_score'].mean()
-        esg_std = esg_df['esg_score'].std()
-        roic_mean = esg_df['roic'].mean()
-        roic_std = esg_df['roic'].std()
-        
-        # Avoid division by zero
-        if esg_std > 0:
-            result_df['esg_zscore'] = (result_df['esg_score'] - esg_mean) / esg_std
-        else:
-            result_df['esg_zscore'] = 0
-            
-        if roic_std > 0:
-            result_df['roic_zscore'] = (result_df['roic'] - roic_mean) / roic_std
-        else:
-            result_df['roic_zscore'] = 0
-        
-        # Sort by ESG score descending
-        result_df = result_df.sort_values('esg_score', ascending=False)
-        
-        # Add portfolio-level metrics as summary
-        portfolio_weighted_esg = result_df['weighted_esg'].sum()
-        portfolio_weighted_roic = result_df['weighted_roic'].sum()
-        
-        # Add summary row
-        summary_row = pd.DataFrame({
-            'ticker': ['PORTFOLIO_TOTAL'],
-            'weight': [1.0],
-            'esg_score': [portfolio_weighted_esg],
-            'roic': [portfolio_weighted_roic],
-            'weighted_esg': [portfolio_weighted_esg],
-            'weighted_roic': [portfolio_weighted_roic],
-            'environmental': [0], 'social': [0], 'governance': [0],
-            'market_cap': [0], 'esg_zscore': [0], 'roic_zscore': [0],
-            'last_updated': [datetime.now().isoformat()]
-        })
-        
-        result_df = pd.concat([result_df, summary_row], ignore_index=True)
-        
-        return result_df
-        
-    finally:
-        db.close()
+    if roic_std > 0:
+        result_df['roic_zscore'] = (result_df['roic'] - roic_mean) / roic_std
+    else:
+        result_df['roic_zscore'] = 0
+    
+    # Sort by ESG score descending
+    result_df = result_df.sort_values('esg_score', ascending=False)
+    
+    # Add portfolio-level metrics as summary
+    portfolio_weighted_esg = result_df['weighted_esg'].sum()
+    portfolio_weighted_roic = result_df['weighted_roic'].sum()
+    
+    # Add summary row
+    summary_row = pd.DataFrame({
+        'ticker': ['PORTFOLIO_TOTAL'],
+        'weight': [1.0],
+        'esg_score': [portfolio_weighted_esg],
+        'roic': [portfolio_weighted_roic],
+        'weighted_esg': [portfolio_weighted_esg],
+        'weighted_roic': [portfolio_weighted_roic],
+        'environmental': [0], 'social': [0], 'governance': [0],
+        'market_cap': [0], 'esg_zscore': [0], 'roic_zscore': [0],
+        'last_updated': [datetime.now().isoformat()]
+    })
+    
+    result_df = pd.concat([result_df, summary_row], ignore_index=True)
+    
+    return result_df
 
 
 async def flag_controversies(ticker: str) -> List[Tuple[str, str, str]]:
@@ -344,10 +356,6 @@ def auto_ingest_portfolio_data(tickers: List[str], force_refresh: bool = False) 
     """
     print(f"🔄 Starting auto-ingestion for {len(tickers)} tickers...")
     
-    # Initialize database and Yahoo Finance client
-    db = ESGDB()
-    yahoo_client = RobustYahooFinanceClient()
-    
     try:
         ingestion_results = {
             'successful_ingests': [],
@@ -359,7 +367,7 @@ def auto_ingest_portfolio_data(tickers: List[str], force_refresh: bool = False) 
         }
         
         # Check existing data in database
-        existing_records = db.get_all_records()
+        existing_records = get_all_esg_records()
         existing_tickers = {record['ticker'] for record in existing_records}
         
         # Determine which tickers need fetching
@@ -384,7 +392,7 @@ def auto_ingest_portfolio_data(tickers: List[str], force_refresh: bool = False) 
         # Process results and store in database
         for ticker, company_data in results.items():
             try:
-                if company_data.error_message:
+                if hasattr(company_data, 'error_message') and company_data.error_message:
                     ingestion_results['failed_ingests'].append(ticker)
                     ingestion_results['errors'].append(f"{ticker}: {company_data.error_message}")
                     print(f"❌ Failed to fetch data for {ticker}: {company_data.error_message}")
@@ -392,17 +400,17 @@ def auto_ingest_portfolio_data(tickers: List[str], force_refresh: bool = False) 
                 
                 # Convert CompanyData to database record format with enhanced metadata
                 record = {
-                    'ticker': company_data.ticker,
-                    'environmental': company_data.environmental,
-                    'social': company_data.social,
-                    'governance': company_data.governance,
-                    'esg_score': company_data.esg_score,
-                    'roic': company_data.roic,
-                    'market_cap': company_data.market_cap,
-                    'last_updated': company_data.last_updated,
-                    'data_source': company_data.data_source,
-                    'is_delisted': company_data.is_delisted,
-                    'error_message': company_data.error_message
+                    'ticker': getattr(company_data, 'ticker', ticker),
+                    'environmental': getattr(company_data, 'environmental', 0),
+                    'social': getattr(company_data, 'social', 0),
+                    'governance': getattr(company_data, 'governance', 0),
+                    'esg_score': getattr(company_data, 'esg_score', 0),
+                    'roic': getattr(company_data, 'roic', 0),
+                    'market_cap': getattr(company_data, 'market_cap', 0),
+                    'last_updated': getattr(company_data, 'last_updated', datetime.now().isoformat()),
+                    'data_source': getattr(company_data, 'data_source', 'unknown'),
+                    'is_delisted': getattr(company_data, 'is_delisted', False),
+                    'error_message': getattr(company_data, 'error_message', '')
                 }
                 
                 # Add currency and market information based on ticker
@@ -414,17 +422,17 @@ def auto_ingest_portfolio_data(tickers: List[str], force_refresh: bool = False) 
                     record['market'] = 'US'
                 
                 # Store in database using upsert
-                db.upsert_esg_record(record)
+                upsert_esg_record(record)
                 
                 if ticker in existing_tickers:
                     ingestion_results['updated_companies'].append(ticker)
-                    print(f"🔄 Updated {ticker} ({company_data.data_source})")
+                    print(f"🔄 Updated {ticker} ({record['data_source']})")
                 else:
                     ingestion_results['successful_ingests'].append(ticker)
-                    print(f"✅ Ingested {ticker} ({company_data.data_source})")
+                    print(f"✅ Ingested {ticker} ({record['data_source']})")
                 
                 # Track delisted companies
-                if company_data.is_delisted:
+                if record['is_delisted']:
                     ingestion_results['delisted_companies'].append(ticker)
                     print(f"⚠️  {ticker} is delisted - using replacement data")
                 
@@ -433,7 +441,7 @@ def auto_ingest_portfolio_data(tickers: List[str], force_refresh: bool = False) 
                 ingestion_results['errors'].append(f"{ticker}: Database error - {str(e)}")
                 print(f"❌ Database error for {ticker}: {str(e)}")
         
-        # Add quality report to results (fix type issue)
+        # Add quality report to results
         ingestion_results['data_quality_report'] = [quality_report]
         
         # Print summary
@@ -455,8 +463,16 @@ def auto_ingest_portfolio_data(tickers: List[str], force_refresh: bool = False) 
         
         return ingestion_results
         
-    finally:
-        db.close()
+    except Exception as e:
+        print(f"❌ Critical error in auto_ingest_portfolio_data: {str(e)}")
+        return {
+            'successful_ingests': [],
+            'failed_ingests': tickers,
+            'delisted_companies': [],
+            'updated_companies': [],
+            'skipped_companies': [],
+            'errors': [f"Critical error: {str(e)}"]
+        }
 
 
 def rank_portfolio_with_auto_ingest(df: pd.DataFrame, auto_ingest: bool = True) -> pd.DataFrame:
@@ -478,25 +494,20 @@ def rank_portfolio_with_auto_ingest(df: pd.DataFrame, auto_ingest: bool = True) 
         raise ValueError("Weights must sum to 1.0")
     
     # Get current tickers from database
-    db = ESGDB()
-    try:
-        existing_records = db.get_all_records()
-        existing_tickers = {record['ticker'] for record in existing_records}
-        
-        # Find missing tickers
-        portfolio_tickers = set(df['ticker'].str.upper())
-        missing_tickers = portfolio_tickers - existing_tickers
-        
-        # Auto-ingest missing data if requested
-        if auto_ingest and missing_tickers:
-            print(f"🔄 Auto-ingesting data for {len(missing_tickers)} missing tickers...")
-            auto_ingest_portfolio_data(list(missing_tickers))
-        
-        # Now proceed with regular ranking
-        return rank_portfolio(df)
-        
-    finally:
-        db.close()
+    existing_records = get_all_esg_records()
+    existing_tickers = {record['ticker'] for record in existing_records}
+    
+    # Find missing tickers
+    portfolio_tickers = set(df['ticker'].str.upper())
+    missing_tickers = portfolio_tickers - existing_tickers
+    
+    # Auto-ingest missing data if requested
+    if auto_ingest and missing_tickers:
+        print(f"🔄 Auto-ingesting data for {len(missing_tickers)} missing tickers...")
+        auto_ingest_portfolio_data(list(missing_tickers))
+    
+    # Now proceed with regular ranking
+    return rank_portfolio(df)
 
 
 class EnhancedESGAnalytics:
@@ -506,8 +517,6 @@ class EnhancedESGAnalytics:
     """
     
     def __init__(self):
-        self.yahoo_client = RobustYahooFinanceClient()
-        self.db = ESGDB()
         self.news_api_key = os.getenv('NEWS_API_KEY')
         self.alpha_vantage_key = os.getenv('ALPHA_VANTAGE_API_KEY')
         
@@ -608,15 +617,15 @@ class EnhancedESGAnalytics:
             if score > 0:
                 # Get real-time market data for the stock
                 try:
-                    stock_data = self.yahoo_client.fetch_company_data(ticker)
+                    stock_data = fetch_esg_data_with_fallbacks(ticker)
                     
                     result = {
                         'symbol': ticker,
                         'name': details['name'],
                         'sector': details['sector'],
                         'logo_url': '',  # Add logo URL if available
-                        'market_cap': self._format_market_cap(getattr(stock_data, 'market_cap', 0)),
-                        'esg_score': getattr(stock_data, 'esg_score', 0),
+                        'market_cap': self._format_market_cap(stock_data.get('market_cap', 0)),
+                        'esg_score': stock_data.get('esg_score', 0),
                         'roic': getattr(stock_data, 'roic', 0),
                         'score': score,
                         'data_source': getattr(stock_data, 'data_source', 'unknown'),
@@ -715,16 +724,16 @@ class EnhancedESGAnalytics:
         alternatives = []
         for alt_ticker, details in self.indian_stock_universe.items():
             if alt_ticker != ticker and details['sector'] == target_sector:
-                stock_data = self.yahoo_client.fetch_company_data(alt_ticker)
+                stock_data = fetch_esg_data_with_fallbacks(alt_ticker)
                 
                 alternatives.append({
                     'ticker': alt_ticker,
                     'name': details['name'],
                     'sector': details['sector'],
-                    'market_cap_formatted': self._format_market_cap(getattr(stock_data, 'market_cap', 0)),
-                    'esg_score': getattr(stock_data, 'esg_score', 0),
-                    'roic': getattr(stock_data, 'roic', 0),
-                    'data_source': getattr(stock_data, 'data_source', 'unknown'),
+                    'market_cap_formatted': self._format_market_cap(stock_data.get('market_cap', 0)),
+                    'esg_score': stock_data.get('esg_score', 0),
+                    'roic': stock_data.get('roic', 0),
+                    'data_source': stock_data.get('data_source', 'unknown'),
                     'reason': f"Alternative to {ticker} in {target_sector} sector"
                 })
         
@@ -1011,7 +1020,7 @@ class EnhancedESGAnalytics:
             Complete analysis dictionary
         """
         # Get basic ESG data
-        stock_data = self.yahoo_client.fetch_company_data(ticker)
+        stock_data = fetch_esg_data_with_fallbacks(ticker)
         
         # Get predictions
         prediction = self.predict_stock_price(ticker)
@@ -1021,25 +1030,24 @@ class EnhancedESGAnalytics:
         
         # Get alternatives if problematic
         alternatives = []
-        if hasattr(stock_data, 'is_delisted') and hasattr(stock_data, 'error_message'):
-            if getattr(stock_data, 'is_delisted', False) or getattr(stock_data, 'error_message', None):
-                alternatives = self.get_stock_alternatives(ticker)
+        if stock_data.get('is_delisted') and stock_data.get('error_message'):
+            alternatives = self.get_stock_alternatives(ticker)
         
         return {
             'ticker': ticker,
             'basic_data': {
                 'name': self.indian_stock_universe.get(ticker, {}).get('name', 'Unknown'),
                 'sector': self.indian_stock_universe.get(ticker, {}).get('sector', 'Unknown'),
-                'market_cap': getattr(stock_data, 'market_cap', 0),
-                'market_cap_formatted': self._format_market_cap(getattr(stock_data, 'market_cap', 0)),
-                'esg_score': getattr(stock_data, 'esg_score', 0),
-                'environmental': getattr(stock_data, 'environmental', 0),
-                'social': getattr(stock_data, 'social', 0),
-                'governance': getattr(stock_data, 'governance', 0),
-                'roic': getattr(stock_data, 'roic', 0),
-                'is_delisted': getattr(stock_data, 'is_delisted', False),
-                'data_source': getattr(stock_data, 'data_source', 'unknown'),
-                'error_message': getattr(stock_data, 'error_message', None)
+                'market_cap': stock_data.get('market_cap', 0),
+                'market_cap_formatted': self._format_market_cap(stock_data.get('market_cap', 0)),
+                'esg_score': stock_data.get('esg_score', 0),
+                'environmental': stock_data.get('environmental', 0),
+                'social': stock_data.get('social', 0),
+                'governance': stock_data.get('governance', 0),
+                'roic': stock_data.get('roic', 0),
+                'is_delisted': stock_data.get('is_delisted', False),
+                'data_source': stock_data.get('data_source', 'unknown'),
+                'error_message': stock_data.get('error_message', None)
             },
             'prediction': prediction,
             'manipulation_risk': manipulation,
