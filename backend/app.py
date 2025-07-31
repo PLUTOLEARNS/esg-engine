@@ -7,15 +7,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 import requests
 import json
 
 # Import enhanced analytics with fallback
 try:
-    from enhanced_analytics import EnhancedESGAnalytics
+    from backend.enhanced_analytics import EnhancedESGAnalytics
 except ImportError:
-    EnhancedESGAnalytics = None
+    try:
+        from enhanced_analytics import EnhancedESGAnalytics
+    except ImportError:
+        EnhancedESGAnalytics = None
+        print("⚠️ Enhanced analytics not available - running in basic mode")
 
 load_dotenv()
 
@@ -69,6 +74,24 @@ class AIAnalysisResponse(BaseModel):
     esg_explanation: str
     roic_explanation: str
 
+
+@app.get("/api/status")
+async def api_status():
+    """
+    Detailed API status for monitoring.
+    """
+    return {
+        "api_version": "1.0.0",
+        "enhanced_features": EnhancedESGAnalytics is not None,
+        "endpoints": {
+            "portfolio_analysis": "/api/portfolio/analyze",
+            "stock_search": "/api/enhanced/search",
+            "stock_prediction": "/api/enhanced/predict",
+            "manipulation_detection": "/api/enhanced/manipulation"
+        },
+        "status": "operational",
+        "accuracy_disclaimer": "All predictions and ESG scores are estimates. Not financial advice."
+    }
 
 @app.get("/")
 async def root():
@@ -169,8 +192,35 @@ async def get_controversy_flags(ticker: str):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "timestamp": pd.Timestamp.now().isoformat()}
+    """
+    Health check endpoint for monitoring services.
+    Uptime Robot will ping this endpoint to verify the service is running.
+    """
+    try:
+        # Test enhanced analytics (if available)
+        enhanced_status = "available" if EnhancedESGAnalytics else "unavailable"
+        
+        # Test API keys (without exposing them)
+        api_keys_status = {
+            "news_api": bool(os.getenv('NEWS_API_KEY')),
+            "alpha_vantage": bool(os.getenv('ALPHA_VANTAGE_API_KEY')),
+        }
+        
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "version": "1.0.0",
+            "services": {
+                "enhanced_analytics": enhanced_status,
+                "api_keys": api_keys_status
+            },
+            "uptime": "Service is running normally"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=503, 
+            detail=f"Service unhealthy: {str(e)}"
+        )
 
 
 @app.post("/ingest")

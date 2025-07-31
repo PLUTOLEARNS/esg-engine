@@ -1,0 +1,74 @@
+# ESG Engine Environment Variables Configuration
+# Copy this file to .env and fill in your API keys
+
+# ===========================================
+# REQUIRED API KEYS FOR ENHANCED FEATURES
+# ===========================================
+
+# News API (for controversy detection and market manipulation alerts)
+# Get your free API key from: https://newsapi.org/
+# Free tier: 1000 requests/day, perfect for ESG monitoring
+NEWS_API_KEY=your_news_api_key_here
+
+# Alpha Vantage API (for enhanced stock search and financial data)
+# Get your free API key from: https://www.alphavantage.co/support/#api-key
+# Free tier: 500 requests/day
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key_here
+
+# ===========================================
+# OPTIONAL MONITORING & UPTIME SERVICES
+# ===========================================
+
+# Uptime Robot API (for monitoring your deployed services)
+# Get your API key from: https://uptimerobot.com/
+UPTIMEROBOT_API_KEY=your_uptimerobot_api_key_here
+
+# ===========================================
+# ESG ANALYSIS CONFIGURATION
+# ===========================================
+
+# Cache settings (hours)
+CACHE_EXPIRE_HOURS=24
+
+# Market manipulation detection thresholds
+VOLUME_SPIKE_THRESHOLD=2.0      # Volume spike multiplier (2.0 = 200% of average)
+VOLATILITY_THRESHOLD=0.05       # Price volatility threshold (5% daily change)
+
+# ===========================================
+# DEPLOYMENT SETTINGS
+# ===========================================
+
+# Environment (development, staging, production)
+ENVIRONMENT=production
+
+# Log level (DEBUG, INFO, WARNING, ERROR)
+LOG_LEVEL=INFO
+
+# ===========================================
+# IMPORTANT SECURITY NOTES
+# ===========================================
+
+# 1. NEVER commit .env files to GitHub
+# 2. API keys should be kept secret
+# 3. Use different API keys for development and production
+# 4. Regularly rotate your API keys
+# 5. Monitor API usage to detect unauthorized access
+
+# ===========================================
+# FREE TIER LIMITATIONS
+# ===========================================
+
+# News API Free Tier:
+# - 1000 requests/day
+# - No commercial use
+# - 30-day retention
+
+# Alpha Vantage Free Tier:
+# - 500 requests/day
+# - 5 requests/minute
+# - No intraday data for some endpoints
+
+# Uptime Robot Free Tier:
+# - 50 monitors
+# - 5-minute check intervals
+# - Email alerts only

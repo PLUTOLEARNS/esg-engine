@@ -216,7 +216,7 @@ async def flag_controversies(ticker: str) -> List[Tuple[str, str, str]]:
 
 def sync_flag_controversies(ticker: str) -> List[Tuple[str, str, str]]:
     """
-    Synchronous wrapper for flag_controversies function.
+    Synchronous wrapper for flag_controversies function with enhanced error handling.
     
     Args:
         ticker: Stock ticker symbol
@@ -225,12 +225,31 @@ def sync_flag_controversies(ticker: str) -> List[Tuple[str, str, str]]:
         List of 3-tuples: (date, title, link) for relevant filings
     """
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    return loop.run_until_complete(flag_controversies(ticker))
+        # Check if there's an existing event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is running, create a new thread for the async call
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, flag_controversies(ticker))
+                    return future.result(timeout=30)
+            else:
+                return loop.run_until_complete(flag_controversies(ticker))
+        except RuntimeError:
+            # No event loop exists, create one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(flag_controversies(ticker))
+            loop.close()
+            return result
+    except Exception as e:
+        print(f"Error in sync_flag_controversies for {ticker}: {e}")
+        # Return fallback controversy data
+        return [
+            ("2024-01-01", f"Controversy check failed for {ticker}: {str(e)}", ""),
+            ("2024-01-01", "Using fallback data - API may be unavailable", "")
+        ]
 
 
 def auto_ingest_portfolio_data(tickers: List[str], force_refresh: bool = False) -> Dict[str, Any]:

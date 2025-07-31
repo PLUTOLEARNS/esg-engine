@@ -18,11 +18,13 @@ try:
     from backend.scrapers.yahoo_client import RobustYahooFinanceClient
     from backend.analytics import rank_portfolio
     from backend.db import ESGDB
+    from backend.esg_validator import esg_validator
 except ImportError:
     try:
         from .scrapers.yahoo_client import RobustYahooFinanceClient
         from .analytics import rank_portfolio
         from .db import ESGDB
+        from .esg_validator import esg_validator
     except ImportError:
         # Final fallback - create dummy classes
         class RobustYahooFinanceClient:
@@ -48,6 +50,17 @@ except ImportError:
         class ESGDB:
             def __init__(self):
                 pass
+        
+        # Dummy validator
+        class DummyValidator:
+            def validate_esg_score(self, *args, **kwargs):
+                return {'is_valid': True, 'warnings': ['Validator not available'], 'confidence_level': 'low'}
+            def validate_prediction_model(self, *args, **kwargs):
+                return {'is_reliable': False, 'warnings': ['Validator not available'], 'risk_level': 'high'}
+            def generate_accuracy_report(self):
+                return "⚠️ ESG Validator not available - all results should be treated as unreliable"
+        
+        esg_validator = DummyValidator()
 
 # Load environment variables
 load_dotenv()
@@ -399,7 +412,14 @@ class EnhancedESGAnalytics:
                 'change_percent': round(change_percent, 2),
                 'model': 'Linear Regression',
                 'data_points': len(hist),
-                'volatility': round(volatility, 4)
+                'volatility': round(volatility, 4),
+                'validation': esg_validator.validate_prediction_model({
+                    'confidence': confidence,
+                    'change_percent': change_percent,
+                    'data_points': len(hist),
+                    'model': 'Linear Regression'
+                }),
+                'accuracy_warning': '⚠️ This is a statistical estimate only. Not financial advice.'
             }
             
         except Exception as e:
